@@ -252,6 +252,7 @@ f ado/pte_postestimation.sthlp
 f ado/pte_setup.sthlp
 f ado/pte_simulate.sthlp
 f ado/pte_version.sthlp
+f ado/lpte.mlib
 f mata/_pte_bygroup_helpers.mata
 f mata/_pte_cf_divergent_boot_agg.mata
 f mata/_pte_color_map.mata
