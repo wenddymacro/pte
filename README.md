@@ -159,7 +159,7 @@ pte_graph, evolution
 
 ### Example 3: Bootstrap Inference with Translog
 
-For publication-quality results, use the Translog specification with bootstrap inference. The Translog production function allows non-constant returns to scale and input complementarities.
+This example demonstrates the Translog specification with bootstrap inference. The Translog production function allows non-constant returns to scale and input complementarities.
 
 ```stata
 findfile pte_example.dta
@@ -319,60 +319,6 @@ After estimation, `pte` stores results in `e()` accessible via `ereturn list`.
 | `e(correction)` | Correction applied (`clk`) |
 | `e(predict)` | Prediction program (`pte_p`) |
 
-## Common Configurations
-
-Recommended parameter combinations for typical use cases:
-
-| Use Case | Configuration |
-|----------|---------------|
-| Quick exploration | `pfunc(cd)` (fast, fewer parameters) |
-| Publication baseline | `pfunc(translog) bootstrap(500) control(trend)` |
-| Short panels (T ≤ 8) | `omegapoly(2) attperiods(3)` |
-| Long panels (T ≥ 15) | `omegapoly(3) attperiods(6)` |
-| Large N, speed priority | `pfunc(cd) noparallel bootstrap(200)` |
-| Industry-level analysis | `by(industry) pfunc(cd) bootstrap(200)` |
-| Non-absorbing treatment | `nonabsorbing pfunc(cd)` |
-| Replication mode | `replicate(order3) seed(123456)` |
-
-## FAQ / Troubleshooting
-
-**Q: I get "treatment path error: treatment is not absorbing"**
-
-Your treatment variable switches from 1 back to 0 for some firms. By default, `pte` requires absorbing treatment. Either clean your data to enforce absorbing treatment, or add the `nonabsorbing` option:
-```stata
-pte lny, free(lnl) state(lnk) proxy(lnm) treatment(D) nonabsorbing
-```
-
-**Q: Bootstrap is very slow. How can I speed it up?**
-
-Several strategies:
-1. Use Cobb-Douglas (`pfunc(cd)`) instead of Translog — fewer parameters, faster GMM.
-2. Reduce `bootstrap()` to 200 for initial exploration (use 500+ for final results).
-3. Install the `parallel` package for multi-core acceleration: `ssc install parallel`.
-4. Use `by(industry)` with `parallel` for automatic parallelization across groups.
-5. Reduce `nsim()` (default 100) — values of 50 are usually adequate for point estimation.
-
-**Q: ATT is missing (.) for some periods. What happened?**
-
-Missing ATT at specific event-time horizons typically means insufficient treated firms are observed at that distance from treatment onset. Check:
-```stata
-tab _pte_nt if _pte_treat_post == 1
-```
-If counts are very low at high `nt`, reduce `attperiods()` to the maximum well-populated horizon.
-
-**Q: GMM did not converge. What should I do?**
-
-Convergence failures usually indicate data issues:
-1. Check for collinearity among inputs: `correlate lnl lnk lnm`.
-2. Ensure sufficient variation in the proxy variable.
-3. Try reducing polynomial order: `omegapoly(2)` instead of the default 3.
-4. Verify that transition observations exist: if no firm ever switches treatment, the CLK correction has no bite and the model may be poorly identified.
-5. Add a time-trend control (e.g., `gen trend = year` then `control(trend)`) to absorb aggregate time shocks.
-
-**Q: How do I interpret negative ATT values?**
-
-A negative ATT indicates that treatment *reduced* productivity on average. This is economically meaningful — some interventions (e.g., regulatory burdens) may decrease efficiency. Verify using `pte_diagnose` that the identifying assumptions hold, and check `pte_graph, evolution` to visualize the divergence in productivity paths.
-
 ## Syntax Reference
 
 The main estimation command:
@@ -438,33 +384,6 @@ If you use `pte` in your research, please cite both the methodology paper and th
   url={https://github.com/gorgeousfish/pte}
 }
 ```
-
-## Related Packages
-
-| Package | Relationship |
-|---------|-------------|
-| [`prodest`](https://github.com/GabrieleRovigatti/prodest) | Production function estimation (ACF/LP/OP); `pte` extends this with CLK correction |
-| [`acfest`](https://ideas.repec.org/c/boc/bocode/s458951.html) | ACF estimator for Stata; `pte` builds on the same proxy variable framework |
-| `reghdfe` | High-dimensional FE regression; used by `pte_compare` for TWFE benchmarks |
-| [`did`](https://github.com/pedrohcgs/did) | Difference-in-differences (Callaway & Sant'Anna); `pte` adapts similar event-study logic for structural productivity |
-| [`csdid`](https://github.com/friosavila/csdid) | Callaway-Sant'Anna DiD for Stata; alternative when production function structure is not needed |
-
-## Documentation
-
-Complete help files are available after installation:
-
-```stata
-help pte                   // Main estimation command
-help pte_setup             // Data preparation
-help pte_diagnose          // Assumption diagnostics
-help pte_graph             // Visualization
-help pte_compare           // Method comparison
-help pte_heterogeneity     // Heterogeneity analysis
-help pte_export            // Results export
-help pte_postestimation    // Overview of post-estimation tools
-```
-
-**Theoretical foundation:** Chen, Z., Liao, M., & Schurter, K. (2026). "Identifying Treatment Effects on Productivity: Theory with an Application to Production Digitalization." *RAND Journal of Economics*.
 
 ## Authors
 
