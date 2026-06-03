@@ -46,7 +46,8 @@ A naive TWFE regression of recovered ω on treatment dummies produces biased est
 - Firm-level productivity recovery from estimated parameters
 - ATT estimation through Monte Carlo counterfactual simulation (Proposition 4.3)
 - Clustered bootstrap inference with stratified resampling
-- Non-absorbing treatment and treatment-dependent production function extensions
+- Treatment-dependent production function extensions
+- Non-absorbing treatment support (planned for v1.1)
 - Cohort analysis, heterogeneity analysis (CATT), and method comparison
 - Parallel computing support for grouped bootstrap acceleration
 - Publication-quality visualization for treatment effects, diagnostics, and distributions
@@ -319,6 +320,8 @@ After estimation, `pte` stores results in `e()` accessible via `ereturn list`.
 | `e(correction)` | Correction applied (`clk`) |
 | `e(predict)` | Prediction program (`pte_p`) |
 
+For the complete list of stored results, see `help pte` or type `ereturn list` after estimation.
+
 ## Syntax Reference
 
 The main estimation command:
@@ -347,8 +350,8 @@ pte depvar, free(varname) state(varname) proxy(varname) treatment(varname) [opti
 | `bootstrap(#)` | 0 | Bootstrap replications (0 = point estimation only) |
 | `by(varname)` | — | Group-by variable (e.g., industry) |
 | `control(varlist)` | — | Controls for first-stage regression (e.g., a pre-generated `trend` variable) |
-| `seed(#)` | 123456 | Random number seed for simulation |
-| `level(#)` | 95 | Confidence level for bootstrap CIs |
+| `seed(#)` | 123456 | Random number seed for ATT simulation. Bootstrap uses sequential seeds (1, 2, ...); grouped estimation uses pathway-specific seeds. See `help pte` for details |
+| `level(#)` | `c(level)` | Confidence level for bootstrap CIs |
 | `nonabsorbing` | — | Enable non-absorbing (reversible) treatment |
 | `treatdependent` | — | Enable treatment-dependent production function |
 | `nolog` | — | Suppress progress output |
