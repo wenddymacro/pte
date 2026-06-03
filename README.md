@@ -104,12 +104,6 @@ Use `pte_check_deps` to verify dependencies before advanced workflows.
 net install pte, from("https://raw.githubusercontent.com/gorgeousfish/pte/main")
 ```
 
-### From SSC (after public release)
-
-```stata
-ssc install pte
-```
-
 ### Verify Installation
 
 ```stata
