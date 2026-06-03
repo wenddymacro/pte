@@ -16,7 +16,7 @@
 
 The core innovation is the **CLK correction**: in ACF-style production function estimation, transition-period observations (where treatment status changes) are excluded, two separate productivity evolution paths are estimated, and counterfactual productivity is simulated via Monte Carlo to compute unbiased Average Treatment Effects on the Treated (ATT).
 
-`pte` supports Cobb-Douglas and Translog production functions, clustered bootstrap inference, non-absorbing treatment extensions, cohort and heterogeneity analyses, and publication-quality visualization — all within a single, integrated workflow.
+`pte` supports Cobb-Douglas and Translog production functions, clustered bootstrap inference, treatment-dependent production function extensions, cohort and heterogeneity analyses, and publication-quality visualization — all within a single, integrated workflow.
 
 ## Statement of Need
 
@@ -47,7 +47,6 @@ A naive TWFE regression of recovered ω on treatment dummies produces biased est
 - ATT estimation through Monte Carlo counterfactual simulation (Proposition 4.3)
 - Clustered bootstrap inference with stratified resampling
 - Treatment-dependent production function extensions
-- Non-absorbing treatment support (planned for v1.1)
 - Cohort analysis, heterogeneity analysis (CATT), and method comparison
 - Parallel computing support for grouped bootstrap acceleration
 - Publication-quality visualization for treatment effects, diagnostics, and distributions
@@ -231,13 +230,13 @@ Your dataset must satisfy the following requirements before calling `pte`:
 | Free input | Log freely-adjustable input, continuous | `lnl = log(labor)` |
 | State variable | Log state/predetermined input, continuous | `lnk = log(capital)` |
 | Proxy variable | Log proxy for unobserved productivity, continuous | `lnm = log(materials)` |
-| Treatment | Binary (0/1), absorbing by default | `D = 1` after policy adoption |
+| Treatment | Binary (0/1), absorbing | `D = 1` after policy adoption |
 | Missing values | No missing values in key variables | Use `drop if missing(...)` |
 | Temporal depth | ≥2 pre-treatment periods recommended | For evolution estimation |
 
 **Important notes:**
 - All continuous variables should be in **logarithms** (the production function is log-linear).
-- Treatment is **absorbing** by default (once treated, always treated). Use `nonabsorbing` for reversible treatments.
+- Treatment must be **absorbing** (once treated, always treated). Non-absorbing (reversible) treatment support is planned for v1.1.
 - The panel must be declared with `xtset id time` before estimation.
 
 ## Command Reference
@@ -352,11 +351,18 @@ pte depvar, free(varname) state(varname) proxy(varname) treatment(varname) [opti
 | `control(varlist)` | — | Controls for first-stage regression (e.g., a pre-generated `trend` variable) |
 | `seed(#)` | 123456 | Random number seed for ATT simulation. Bootstrap uses sequential seeds (1, 2, ...); grouped estimation uses pathway-specific seeds. See `help pte` for details |
 | `level(#)` | `c(level)` | Confidence level for bootstrap CIs |
-| `nonabsorbing` | — | Enable non-absorbing (reversible) treatment |
 | `treatdependent` | — | Enable treatment-dependent production function |
 | `nolog` | — | Suppress progress output |
 
 For complete syntax documentation, see `help pte` after installation.
+
+## Roadmap
+
+The following features are planned for future releases:
+
+| Feature | Target | Description |
+|---------|--------|-------------|
+| Non-absorbing treatment | v1.1 | Support for reversible treatments where firms can exit treatment status |
 
 ## Citation
 
