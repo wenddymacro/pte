@@ -6,6 +6,10 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-green.svg)]()
 
+<p align="center">
+  <img src="image/image.png" alt="The Shadow of Efficiency - Productivity Treatment Effects" width="100%">
+</p>
+
 ## Overview
 
 `pte` implements the **Productivity Treatment Effects** framework proposed by Chen, Liao & Schurter (2026, *RAND Journal of Economics*) for Stata. The package integrates semiparametric production function estimation with causal treatment effect analysis, providing a unified toolkit for applied researchers studying how interventions affect productive efficiency.
