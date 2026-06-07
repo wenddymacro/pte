@@ -281,7 +281,7 @@ Note: {cmd:pte_compare} requires {cmd:reghdfe} to be installed.
 Run {cmd:pte_check_deps, compare} to verify.{p_end}
 
 {pstd}Setup{p_end}
-{phang2}{cmd:. use "data/mydata.dta", clear}{p_end}
+{phang2}{cmd:. pte_example, clear}{p_end}
 {phang2}{cmd:. xtset firm year}{p_end}
 {phang2}{cmd:. pte lnva, free(lnl) state(lnk) proxy(lnm) treatment(D)}{p_end}
 

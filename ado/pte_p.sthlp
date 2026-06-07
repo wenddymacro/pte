@@ -275,6 +275,8 @@ are not allowed.
 {marker examples}{...}
 {title:Examples}
 
+{phang2}{cmd:. pte_example, clear}{p_end}
+{phang2}{cmd:. xtset firm year}{p_end}
 {phang2}{cmd:. pte lnva, free(lnl) state(lnk) proxy(lnm) treatment(D)}{p_end}
 
 {pstd}Default prediction (omega){p_end}

@@ -259,8 +259,8 @@ stored bootstrap count is positive.
 {pstd}
 {bf:Setup}
 
-{phang2}{cmd:. findfile pte_example.dta}{p_end}
-{phang2}{cmd:. use "`r(fn)'", clear}{p_end}
+{phang2}{cmd:. pte_example, clear}{p_end}
+{phang2}{cmd:. xtset firm year}{p_end}
 
 {phang2}.
 {cmd:. * if you need ATE^count / Delta columns, first build a}

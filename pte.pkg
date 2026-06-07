@@ -15,6 +15,7 @@ f ado/pte_check_deps.ado
 f ado/pte_compare.ado
 f ado/pte_diagnose.ado
 f ado/pte_esttab_att.ado
+f ado/pte_example.ado
 f ado/pte_export.ado
 f ado/pte_graph.ado
 f ado/pte_heterogeneity.ado

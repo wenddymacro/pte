@@ -4,7 +4,7 @@ version 14.0
 program define _pte_display
     version 14.0
     
-    syntax [, NOLog NOAtt BY(varname) AGGregate Level(cilevel)]
+    syntax [, NOLog NOAtt BY(varname) AGGregate Level(cilevel) VERBose]
 
     // Replay can omit by(), but an absent e(by) is read back as "." via
     // Stata's expression assignment; normalize that sentinel to blank before
@@ -96,7 +96,14 @@ program define _pte_display
         }
         exit
     }
+
+    // ─── Compact display mode (default when verbose is not specified) ───
+    if "`verbose'" == "" {
+        _pte_display_compact, `noatt' level(`level')
+        exit
+    }
     
+    // ─── Full verbose display (original behavior) ───
     // Pre-requisite validation
     _pte_display_validate_deps, `noatt' `=cond(`is_bygroup', "bygroup", "")'
     
@@ -1933,4 +1940,329 @@ program define _pte_display_bygroup
         }
         di as text "{hline 78}"
     }
+end
+
+
+// =========================================================================
+// Compact display program (default non-verbose mode)
+// =========================================================================
+
+program define _pte_display_compact
+    version 14.0
+    syntax [, NOAtt Level(cilevel)]
+    
+    // Default confidence level
+    if "`level'" == "" local level = 95
+    
+    // --- Header with two-column layout ---
+    local N = e(N)
+    local N_gmm = e(N_gmm)
+    capture local N_firms = e(N_g)
+    if _rc != 0 | missing(`N_firms') {
+        local N_firms = .
+    }
+    
+    local pfunc = "`e(pfunc)'"
+    if "`pfunc'" == "cd" {
+        local pfunc_display "Cobb-Douglas"
+    }
+    else {
+        local pfunc_display "Translog"
+    }
+    
+    display ""
+    display as text "{hline 70}"
+    display as text "Production Function Estimates" ///
+        _col(45) "Number of obs   = " as result %9.0fc `N'
+    display as text "  Method: ACF with CLK correction" ///
+        _col(45) "GMM sample      = " as result %9.0fc `N_gmm'
+    
+    local trimeps = e(trimeps)
+    if `trimeps' == 1 {
+        display as text "  Trim eps0: 1%-99%" ///
+            _col(45) "Firms           = " as result %9.0fc `N_firms'
+    }
+    else {
+        display as text "  Trim eps0: off" ///
+            _col(45) "Firms           = " as result %9.0fc `N_firms'
+    }
+    display as text "{hline 70}"
+    
+    // --- Coefficient table ---
+    if "`pfunc'" == "cd" {
+        capture local bl = e(beta_l)
+        capture local bk = e(beta_k)
+        if !missing(`bl') & !missing(`bk') {
+            display as text _col(5) "beta_l" _col(20) "= " as result %9.6f `bl'
+            display as text _col(5) "beta_k" _col(20) "= " as result %9.6f `bk'
+        }
+        else {
+            // Try from e(b) matrix
+            capture confirm matrix e(b)
+            if _rc == 0 {
+                tempname _cb
+                matrix `_cb' = e(b)
+                local bl = `_cb'[1, 1]
+                local bk = `_cb'[1, 2]
+                display as text _col(5) "beta_l" _col(20) "= " as result %9.6f `bl'
+                display as text _col(5) "beta_k" _col(20) "= " as result %9.6f `bk'
+            }
+        }
+        // Show GMM objective value
+        capture local fval = e(fval)
+        if !missing(`fval') {
+            display as text _col(5) "GMM obj" _col(20) "= " as result %9.2e `fval'
+        }
+    }
+    else {
+        // Translog - show all beta coefficients
+        capture local bl = e(beta_l)
+        capture local bk = e(beta_k)
+        capture local bll = e(beta_ll)
+        capture local bkk = e(beta_kk)
+        capture local blk = e(beta_lk)
+        if !missing(`bl') {
+            display as text _col(5) "beta_l" _col(20) "= " as result %9.6f `bl'
+        }
+        if !missing(`bk') {
+            display as text _col(5) "beta_k" _col(20) "= " as result %9.6f `bk'
+        }
+        if !missing(`bll') {
+            display as text _col(5) "beta_ll" _col(20) "= " as result %9.6f `bll'
+        }
+        if !missing(`bkk') {
+            display as text _col(5) "beta_kk" _col(20) "= " as result %9.6f `bkk'
+        }
+        if !missing(`blk') {
+            display as text _col(5) "beta_lk" _col(20) "= " as result %9.6f `blk'
+        }
+        capture local fval = e(fval)
+        if !missing(`fval') {
+            display as text _col(5) "GMM obj" _col(20) "= " as result %9.2e `fval'
+        }
+    }
+    
+    // --- ATT results ---
+    if "`noatt'" == "" {
+        display as text "{hline 70}"
+        local attperiods = e(attperiods_max)
+        local nsim = e(nsim)
+        display as text "ATT Results (event time 0..`attperiods')" ///
+            _col(45) "Sim. paths      = " as result %9.0fc `nsim'
+        display as text "{hline 70}"
+        
+        // Check for bootstrap inference
+        local has_bs_se = 0
+        local bootstrap_reps = .
+        capture local bootstrap_reps = e(bootstrap)
+        if _rc != 0 | missing(`bootstrap_reps') {
+            capture local bootstrap_reps = e(breps)
+        }
+        if _rc != 0 | missing(`bootstrap_reps') {
+            capture local bootstrap_reps = e(nboot)
+        }
+        if !missing(`bootstrap_reps') & `bootstrap_reps' > 0 {
+            capture confirm matrix e(att_se)
+            if _rc == 0 {
+                local has_bs_se = 1
+            }
+        }
+        
+        // Try to display ATT table from result_table_trim or att_table
+        tempname att_src
+        local has_att_src = 0
+        capture confirm matrix e(result_table_trim)
+        if _rc == 0 {
+            matrix `att_src' = e(result_table_trim)
+            local has_att_src = 1
+        }
+        else {
+            capture confirm matrix e(result_table_raw)
+            if _rc == 0 {
+                matrix `att_src' = e(result_table_raw)
+                local has_att_src = 1
+            }
+            else {
+                capture confirm matrix e(att_table)
+                if _rc == 0 {
+                    matrix `att_src' = e(att_table)
+                    local has_att_src = 1
+                }
+            }
+        }
+        
+        if `has_att_src' {
+            local nrows = rowsof(`att_src')
+            local ncols = colsof(`att_src')
+            
+            // Determine display rows (exclude overall row if present)
+            local display_rows = `nrows'
+            local has_overall_row = 0
+            local last_nt = el(`att_src', `nrows', 1)
+            if !missing(`last_nt') & `last_nt' < 0 {
+                local has_overall_row = 1
+                local display_rows = `nrows' - 1
+            }
+            
+            // Table header
+            if `has_bs_se' {
+                display as text " {ralign 6:Period} {c |} {ralign 10:ATT} {ralign 10:Std.Err.} {ralign 22:[`level'% Conf. Int.]}"
+                display as text " {hline 7}{c +}{hline 55}"
+            }
+            else {
+                display as text " {ralign 6:Period} {c |} {ralign 10:ATT} {ralign 10:Std.Dev.} {ralign 8:N}"
+                display as text " {hline 7}{c +}{hline 35}"
+            }
+            
+            // Bootstrap SE and CI matrices
+            if `has_bs_se' {
+                tempname se_mat ci_lo_mat ci_hi_mat
+                matrix `se_mat' = e(att_se)
+                local has_ci = 0
+                capture confirm matrix e(att_ci_lower)
+                if _rc == 0 {
+                    capture confirm matrix e(att_ci_upper)
+                    if _rc == 0 {
+                        local has_ci = 1
+                        matrix `ci_lo_mat' = e(att_ci_lower)
+                        matrix `ci_hi_mat' = e(att_ci_upper)
+                    }
+                }
+            }
+            
+            // Display period rows
+            forvalues i = 1/`display_rows' {
+                local ell = el(`att_src', `i', 1)
+                local att_val = el(`att_src', `i', 2)
+                
+                if missing(`att_val') {
+                    display as text " {ralign 6:" %3.0f `ell' "} {c |} " as text "."
+                    continue
+                }
+                
+                if `has_bs_se' {
+                    // Get SE
+                    local se_val = .
+                    local se_rows = rowsof(`se_mat')
+                    local se_cols = colsof(`se_mat')
+                    if `se_rows' == 1 & `se_cols' >= `i' {
+                        local se_val = el(`se_mat', 1, `i')
+                    }
+                    else if `se_cols' == 1 & `se_rows' >= `i' {
+                        local se_val = el(`se_mat', `i', 1)
+                    }
+                    // Significance stars
+                    local sig ""
+                    if !missing(`se_val') & `se_val' > 0 {
+                        local t_stat = abs(`att_val' / `se_val')
+                        if `t_stat' > 2.576 {
+                            local sig "***"
+                        }
+                        else if `t_stat' > 1.960 {
+                            local sig "**"
+                        }
+                        else if `t_stat' > 1.645 {
+                            local sig "*"
+                        }
+                    }
+                    // CI
+                    local ci_lo = .
+                    local ci_hi = .
+                    if `has_ci' {
+                        local ci_lo_cols = colsof(`ci_lo_mat')
+                        local ci_lo_rows = rowsof(`ci_lo_mat')
+                        if `ci_lo_rows' == 1 & `ci_lo_cols' >= `i' {
+                            local ci_lo = el(`ci_lo_mat', 1, `i')
+                            local ci_hi = el(`ci_hi_mat', 1, `i')
+                        }
+                        else if `ci_lo_cols' == 1 & `ci_lo_rows' >= `i' {
+                            local ci_lo = el(`ci_lo_mat', `i', 1)
+                            local ci_hi = el(`ci_hi_mat', `i', 1)
+                        }
+                    }
+                    display as text " {ralign 6:" %3.0f `ell' "} {c |} " ///
+                        as result %10.4f `att_val' "`sig'" ///
+                        as text "  (" as result %7.4f `se_val' as text ")" ///
+                        as text "  [" as result %8.4f `ci_lo' ///
+                        as text "," as result %8.4f `ci_hi' as text "]"
+                }
+                else {
+                    // Point estimate: show ATT, sd, N
+                    local sd_val = .
+                    if `ncols' >= 3 {
+                        local sd_val = el(`att_src', `i', 3)
+                    }
+                    local n_obs = .
+                    if `ncols' >= 4 {
+                        local n_obs = el(`att_src', `i', 4)
+                    }
+                    display as text " {ralign 6:" %3.0f `ell' "} {c |} " ///
+                        as result %10.4f `att_val' ///
+                        as text "  " as result %10.4f `sd_val' ///
+                        as text "  " as result %8.0f `n_obs'
+                }
+            }
+            
+            // Overall row
+            display as text " {hline 7}{c +}{hline 55}"
+            capture local att_avg = e(ATT_avg_trim)
+            if _rc != 0 | missing(`att_avg') {
+                capture local att_avg = e(ATT_avg)
+            }
+            if !missing(`att_avg') {
+                if `has_bs_se' {
+                    // Get overall SE
+                    local se_overall = .
+                    capture local se_overall = e(bs_se)
+                    if _rc != 0 | missing(`se_overall') {
+                        capture local se_overall = e(bs_se_trim)
+                    }
+                    local sig ""
+                    if !missing(`se_overall') & `se_overall' > 0 {
+                        local t_stat = abs(`att_avg' / `se_overall')
+                        if `t_stat' > 2.576 {
+                            local sig "***"
+                        }
+                        else if `t_stat' > 1.960 {
+                            local sig "**"
+                        }
+                        else if `t_stat' > 1.645 {
+                            local sig "*"
+                        }
+                    }
+                    local ci_lo = .
+                    local ci_hi = .
+                    capture local ci_lo = e(ci_lo)
+                    if _rc != 0 | missing(`ci_lo') {
+                        capture local ci_lo = e(ci_lo_trim)
+                    }
+                    capture local ci_hi = e(ci_hi)
+                    if _rc != 0 | missing(`ci_hi') {
+                        capture local ci_hi = e(ci_hi_trim)
+                    }
+                    display as text " {ralign 6:avg} {c |} " ///
+                        as result %10.4f `att_avg' "`sig'" ///
+                        as text "  (" as result %7.4f `se_overall' as text ")" ///
+                        as text "  [" as result %8.4f `ci_lo' ///
+                        as text "," as result %8.4f `ci_hi' as text "]"
+                }
+                else {
+                    display as text " {ralign 6:avg} {c |} " ///
+                        as result %10.4f `att_avg'
+                }
+            }
+        }
+        else {
+            // Fallback: show scalar ATT
+            capture local att_avg = e(ATT_avg_trim)
+            if _rc != 0 | missing(`att_avg') {
+                capture local att_avg = e(ATT_avg)
+            }
+            if !missing(`att_avg') {
+                display as text " ATT (avg)  = " as result %10.4f `att_avg'
+            }
+        }
+        display as text "{hline 70}"
+    }
+    display ""
 end

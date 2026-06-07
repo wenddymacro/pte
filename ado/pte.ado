@@ -2360,56 +2360,66 @@ program define pte, eclass sortpreserve
         // Match the serial public contract: estimation-progress chatter may
         // differ from replay, but the live grouped path must still end on the
         // same public result summary produced from the reposted e() bundle.
-        _pte_display, `noatt' level(`level')
+        _pte_display, `noatt' level(`level') `verbose'
         exit
     }
 
 
     // Emit the banner only after validation so early failures stay concise.
     if "`nolog'" == "" {
-        di as text ""
-        di as text "{hline 70}"
-        di as text "Productivity Treatment Effects (PTE)"
-        di as text "Chen, Liao & Schurter (2026)"
-        di as text "{hline 70}"
-        di as text "  Dependent variable:   " as result "`depvar'"
-        di as text "  Free variable:        " as result "`free'"
-        di as text "  State variable:       " as result "`state'"
-        di as text "  Proxy variable:       " as result "`proxy'"
-        di as text "  Treatment variable:   " as result "`treatment'"
-        di as text "  Panel:                " as result "`id' x `time'"
-        di as text "  Production function:  " as result "`PFtype'"
-        di as text "  Polynomial order:     " as result "`poly'"
-        di as text "  Evolution order:      " as result "`omegapoly'"
-        if `eps0window' == 0 {
-            di as text "  eps0 window:          " as result "all pre-treatment"
-        }
-        else {
-            di as text "  eps0 window:          " as result "`eps0window'" as text " panel periods"
-        }
-        if `do_att' {
-            di as text "  ATT periods:          " as result "0 to `attperiods'"
-            di as text "  Simulation paths:     " as result "`nsim'"
-            if `do_bootstrap' {
-                di as text "  Outer bootstrap seed: " as result "`seed'"
-                di as text "  ATT simulation seed:  " as result "`att_bootstrap_seed' (fixed)"
+        if "`verbose'" != "" {
+            di as text ""
+            di as text "{hline 70}"
+            di as text "Productivity Treatment Effects (PTE)"
+            di as text "Chen, Liao & Schurter (2026)"
+            di as text "{hline 70}"
+            di as text "  Dependent variable:   " as result "`depvar'"
+            di as text "  Free variable:        " as result "`free'"
+            di as text "  State variable:       " as result "`state'"
+            di as text "  Proxy variable:       " as result "`proxy'"
+            di as text "  Treatment variable:   " as result "`treatment'"
+            di as text "  Panel:                " as result "`id' x `time'"
+            di as text "  Production function:  " as result "`PFtype'"
+            di as text "  Polynomial order:     " as result "`poly'"
+            di as text "  Evolution order:      " as result "`omegapoly'"
+            if `eps0window' == 0 {
+                di as text "  eps0 window:          " as result "all pre-treatment"
             }
             else {
-                di as text "  ATT simulation seed:  " as result "`att_point_seed' (fixed)"
+                di as text "  eps0 window:          " as result "`eps0window'" as text " panel periods"
             }
-            di as text "  Trim eps0:            " as result cond(`do_trim', "Yes (1%-99%)", "No")
+            if `do_att' {
+                di as text "  ATT periods:          " as result "0 to `attperiods'"
+                di as text "  Simulation paths:     " as result "`nsim'"
+                if `do_bootstrap' {
+                    di as text "  Outer bootstrap seed: " as result "`seed'"
+                    di as text "  ATT simulation seed:  " as result "`att_bootstrap_seed' (fixed)"
+                }
+                else {
+                    di as text "  ATT simulation seed:  " as result "`att_point_seed' (fixed)"
+                }
+                di as text "  Trim eps0:            " as result cond(`do_trim', "Yes (1%-99%)", "No")
+            }
+            else {
+                di as text "  ATT estimation:       " as result "Skipped (noatt)"
+            }
+            if `do_bootstrap' {
+                di as text "  Bootstrap reps:       " as result "`bootstrap'"
+                di as text "  Confidence level:     " as result "`level'%"
+            }
+            if `is_replicate' {
+                di as text "  Replicate mode:       " as result "`replicate'"
+            }
+            di as text "{hline 70}"
         }
         else {
-            di as text "  ATT estimation:       " as result "Skipped (noatt)"
+            * Compact progress header
+            local _pfunc_label = cond("`pfunc'" == "cd", "Cobb-Douglas", "Translog")
+            display ""
+            display as text "{hline 70}"
+            display as text " Productivity Treatment Effects (PTE) {c -} " as result "`_pfunc_label'"
+            display as text "{hline 70}"
         }
-        if `do_bootstrap' {
-            di as text "  Bootstrap reps:       " as result "`bootstrap'"
-            di as text "  Confidence level:     " as result "`level'%"
-        }
-        if `is_replicate' {
-            di as text "  Replicate mode:       " as result "`replicate'"
-        }
-        di as text "{hline 70}"
     }
 
     // Load Mata libraries before any estimator runs. Otherwise failures can
@@ -2434,9 +2444,14 @@ program define pte, eclass sortpreserve
     // Stage 1 estimates the production function and publishes fitted objects
     // needed by productivity recovery and ATT simulation.
     if "`nolog'" == "" {
-        di as text ""
-        di as text "Step 1/4: Production Function Estimation (Theorem 3.1)"
-        di as text "{hline 70}"
+        if "`verbose'" != "" {
+            di as text ""
+            di as text "Step 1/4: Production Function Estimation (Theorem 3.1)"
+            di as text "{hline 70}"
+        }
+        else {
+            display as text "  Step 1/4: Production function estimation..." _continue
+        }
     }
 
     // Public pte reruns must be idempotent over package-owned transition
@@ -2484,7 +2499,7 @@ program define pte, eclass sortpreserve
     if "`nodiagnose'" != "" {
         local _pf_opts "`_pf_opts' nodiagnose"
     }
-    if "`nolog'" != "" {
+    if "`nolog'" != "" | "`verbose'" == "" {
         local _pf_opts "`_pf_opts' noreport"
     }
     if "`treatdependent'" != "" {
@@ -2503,7 +2518,12 @@ program define pte, eclass sortpreserve
         local _pf_opts "`_pf_opts' dopooledz"
     }
 
-    capture noisily _pte_prodfunc, `_pf_opts'
+    if "`verbose'" == "" & "`nolog'" == "" {
+        capture _pte_prodfunc, `_pf_opts'
+    }
+    else {
+        capture noisily _pte_prodfunc, `_pf_opts'
+    }
     local _pf_rc = _rc
     if `_pf_rc' != 0 {
         quietly use `_pte_orig_data', clear
@@ -2517,6 +2537,16 @@ program define pte, eclass sortpreserve
         }
         _pte_error, errcode(`_pf_rc') ///
             msg("Production function estimation failed (rc = `_pf_rc')")
+    }
+
+    if "`verbose'" == "" & "`nolog'" == "" {
+        local _fval = e(fval)
+        if "`_fval'" != "" & "`_fval'" != "." {
+            display as result " done (fval = " %8.2e `_fval' ")"
+        }
+        else {
+            display as result " done"
+        }
     }
 
     // Cache stage-1 coefficients locally because later calls overwrite _b.
@@ -2554,9 +2584,14 @@ program define pte, eclass sortpreserve
     // Stage 2 recovers omega, estimates the state-specific evolution laws, and
     // constructs the eps0 objects used in the counterfactual simulator.
     if "`nolog'" == "" {
-        di as text ""
-        di as text "Step 2/4: Productivity Recovery and Evolution"
-        di as text "{hline 70}"
+        if "`verbose'" != "" {
+            di as text ""
+            di as text "Step 2/4: Productivity Recovery and Evolution"
+            di as text "{hline 70}"
+        }
+        else {
+            display as text "  Step 2/4: Productivity recovery..." _continue
+        }
     }
 
     tempname rho_0_mat
@@ -2572,7 +2607,12 @@ program define pte, eclass sortpreserve
             local _td_omega_opts "nodiagnose"
         }
 
-        capture noisily _pte_treatdep_omega, `_td_omega_opts'
+        if "`verbose'" == "" & "`nolog'" == "" {
+            capture _pte_treatdep_omega, `_td_omega_opts'
+        }
+        else {
+            capture noisily _pte_treatdep_omega, `_td_omega_opts'
+        }
         local _om_rc = _rc
         if `_om_rc' != 0 {
             quietly use `_pte_orig_data', clear
@@ -2596,7 +2636,12 @@ program define pte, eclass sortpreserve
             local _td_evo_opts "`_td_evo_opts' nodiagnose"
         }
 
-        capture noisily _pte_treatdep_evolution, `_td_evo_opts'
+        if "`verbose'" == "" & "`nolog'" == "" {
+            capture _pte_treatdep_evolution, `_td_evo_opts'
+        }
+        else {
+            capture noisily _pte_treatdep_evolution, `_td_evo_opts'
+        }
         local _td_evo_rc = _rc
         if `_td_evo_rc' != 0 {
             quietly use `_pte_orig_data', clear
@@ -2667,7 +2712,12 @@ program define pte, eclass sortpreserve
             local _td_eps_opts "`_td_eps_opts' nodiagnose"
         }
 
-        capture noisily _pte_eps0_sample, `_td_eps_opts'
+        if "`verbose'" == "" & "`nolog'" == "" {
+            capture _pte_eps0_sample, `_td_eps_opts'
+        }
+        else {
+            capture noisily _pte_eps0_sample, `_td_eps_opts'
+        }
         local _td_eps_rc = _rc
         if `_td_eps_rc' != 0 {
             quietly use `_pte_orig_data', clear
@@ -2691,7 +2741,12 @@ program define pte, eclass sortpreserve
             local _td_win_opts "`_td_win_opts' nodiagnose"
         }
 
-        capture noisily _pte_winsorize, `_td_win_opts'
+        if "`verbose'" == "" & "`nolog'" == "" {
+            capture _pte_winsorize, `_td_win_opts'
+        }
+        else {
+            capture noisily _pte_winsorize, `_td_win_opts'
+        }
         local _td_win_rc = _rc
         if `_td_win_rc' != 0 {
             quietly use `_pte_orig_data', clear
@@ -2716,6 +2771,10 @@ program define pte, eclass sortpreserve
         local om_eps0_p99 = e(eps0_p99)
         local om_eps0window = `eps0window'
         local om_legacy_pooled_eps0 = 0
+
+        if "`verbose'" == "" & "`nolog'" == "" {
+            display as result " done"
+        }
     }
     else {
         // Forward only the options that affect omega recovery and evolution.
@@ -2738,7 +2797,12 @@ program define pte, eclass sortpreserve
             local _om_opts "`_om_opts' nodiagnose"
         }
 
-        capture noisily _pte_omega, `_om_opts'
+        if "`verbose'" == "" & "`nolog'" == "" {
+            capture _pte_omega, `_om_opts'
+        }
+        else {
+            capture noisily _pte_omega, `_om_opts'
+        }
         local _om_rc = _rc
         if `_om_rc' != 0 {
             quietly use `_pte_orig_data', clear
@@ -2752,6 +2816,10 @@ program define pte, eclass sortpreserve
             }
             _pte_error, errcode(`_om_rc') ///
                 msg("Productivity recovery failed (rc = `_om_rc')")
+        }
+
+        if "`verbose'" == "" & "`nolog'" == "" {
+            display as result " done"
         }
 
         // Preserve stage-2 scalars before later estimation steps overwrite e().
@@ -2893,9 +2961,14 @@ program define pte, eclass sortpreserve
         if `do_bootstrap' {
             // Bootstrap reruns the full estimator, including the point estimate.
             if "`nolog'" == "" {
-                di as text ""
-                di as text "Step 3-4/4: Bootstrap ATT Estimation and Inference"
-                di as text "{hline 70}"
+                if "`verbose'" != "" {
+                    di as text ""
+                    di as text "Step 3-4/4: Bootstrap ATT Estimation and Inference"
+                    di as text "{hline 70}"
+                }
+                else {
+                    display as text "  Step 3/4: Bootstrap ATT estimation (" as result "`bootstrap' reps" as text ")..." _continue
+                }
             }
 
             // Restore the untouched panel before the bootstrap worker resamples.
@@ -2932,6 +3005,9 @@ program define pte, eclass sortpreserve
             if `replicate_legacy_pooled_eps0' {
                 local _bs_opts "`_bs_opts' legacypooledeps0"
             }
+            if "`verbose'" == "" & "`nolog'" == "" {
+                local _bs_opts "`_bs_opts' nolog"
+            }
 
             capture noisily _pte_bootstrap, `_bs_opts'
             local _bs_rc = _rc
@@ -2948,6 +3024,10 @@ program define pte, eclass sortpreserve
                 }
                 _pte_error, errcode(`_bs_rc') ///
                     msg("Bootstrap inference failed (rc = `_bs_rc')")
+            }
+
+            if "`verbose'" == "" & "`nolog'" == "" {
+                display as result " done"
             }
 
             capture local att_bootstrap_seed = e(inner_seed)
@@ -3062,9 +3142,14 @@ program define pte, eclass sortpreserve
             // Direct ATT estimation keeps the simulated counterfactual objects
             // in memory, unlike the bootstrap worker that rebuilds them each draw.
             if "`nolog'" == "" {
-                di as text ""
-                di as text "Step 3/4: ATT Estimation (Proposition 4.3)"
-                di as text "{hline 70}"
+                if "`verbose'" != "" {
+                    di as text ""
+                    di as text "Step 3/4: ATT Estimation (Proposition 4.3)"
+                    di as text "{hline 70}"
+                }
+                else {
+                    display as text "  Step 3/4: ATT estimation..." _continue
+                }
             }
 
             // Build _pte_att option string
@@ -3081,7 +3166,12 @@ program define pte, eclass sortpreserve
                 local _att_opts "`_att_opts' nodiagnose"
             }
 
-            capture noisily _pte_att, `_att_opts'
+            if "`verbose'" == "" & "`nolog'" == "" {
+                capture _pte_att, `_att_opts'
+            }
+            else {
+                capture noisily _pte_att, `_att_opts'
+            }
             local _att_rc = _rc
             if `_att_rc' != 0 {
                 quietly use `_pte_orig_data', clear
@@ -3096,6 +3186,10 @@ program define pte, eclass sortpreserve
                 }
                 _pte_error, errcode(`_att_rc') ///
                     msg("ATT estimation failed (rc = `_att_rc')")
+            }
+
+            if "`verbose'" == "" & "`nolog'" == "" {
+                display as result " done"
             }
 
             // Direct ATT estimation returns row vectors for event-time effects.
@@ -3626,6 +3720,11 @@ program define pte, eclass sortpreserve
 
     // Final results summary should not inherit nolog; that option only
     // suppresses estimation-progress chatter, not the posted replay/display.
-    _pte_display, `noatt' level(`level')
+    if "`verbose'" == "" & "`nolog'" == "" {
+        display as text "  Step 4/4: Complete"
+        display as text "{hline 70}"
+        display ""
+    }
+    _pte_display, `noatt' level(`level') `verbose'
 
 end

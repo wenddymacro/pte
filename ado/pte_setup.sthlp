@@ -226,22 +226,22 @@ the helper-variable formulas.
 {title:Examples}
 
 {pstd}{bf:Run setup using current xtset panel variables}{p_end}
-{phang2}{cmd:. use pte_example.dta, clear}{p_end}
+{phang2}{cmd:. pte_example, clear}{p_end}
 {phang2}{cmd:. xtset firm year}{p_end}
 {phang2}{cmd:. pte_setup, treatment(D)}{p_end}
 
 {pstd}{bf:Non-mutating treatment audit}{p_end}
-{phang2}{cmd:. use pte_example.dta, clear}{p_end}
+{phang2}{cmd:. pte_example, clear}{p_end}
 {phang2}{cmd:. xtset firm year}{p_end}
 {phang2}{cmd:. pte_setup, treatment(D) check report}{p_end}
 
 {pstd}{bf:Strict absorbing-treatment check}{p_end}
-{phang2}{cmd:. use pte_example.dta, clear}{p_end}
+{phang2}{cmd:. pte_example, clear}{p_end}
 {phang2}{cmd:. xtset firm year}{p_end}
 {phang2}{cmd:. pte_setup, treatment(D) absorbing}{p_end}
 
 {pstd}{bf:Validate candidate production-function inputs during setup}{p_end}
-{phang2}{cmd:. use pte_example.dta, clear}{p_end}
+{phang2}{cmd:. pte_example, clear}{p_end}
 {phang2}{cmd:. xtset firm year}{p_end}
 {phang2}{cmd:. pte_setup, treatment(D) output(lny) free(lnl) state(lnk) proxy(lnm)}{p_end}
 

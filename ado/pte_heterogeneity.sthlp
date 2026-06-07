@@ -299,8 +299,7 @@ output.
 {pstd}
 {it:Setup: Run pte main estimation first}
 
-{phang2}{cmd:. findfile pte_example.dta}{p_end}
-{phang2}{cmd:. use "`r(fn)'", clear}{p_end}
+{phang2}{cmd:. pte_example, clear}{p_end}
 {phang2}{stata "xtset firm year":. xtset firm year}{p_end}
 {phang2}{cmd:. pte lny, free(lnl) state(lnk) proxy(lnm) treatment(D) attperiods(3) pfunc(translog) omegapoly(3) bootstrap(100) seed(12345)}{p_end}
 

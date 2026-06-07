@@ -381,10 +381,10 @@ trimmed-Gaussian paper track{p_end}
 {bf:Setup}
 
 {phang2}
-{cmd:. findfile pte_example.dta}
+{cmd:. pte_example, clear}
 {p_end}
 {phang2}
-{cmd:. use "`r(fn)'", clear}
+{cmd:. xtset firm year}
 {p_end}
 {phang2}
 {cmd:. pte lny, free(lnl) state(lnk) proxy(lnm) treatment(D)}
