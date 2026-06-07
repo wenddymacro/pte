@@ -98,18 +98,46 @@ Use `pte_check_deps` to verify dependencies before advanced workflows.
 
 ## Installation
 
-### From GitHub
+### Method 1: SSC (Recommended, after acceptance)
 
 ```stata
-net install pte, from("https://raw.githubusercontent.com/gorgeousfish/pte/main")
+ssc install pte
 ```
 
-### Verify Installation
+### Method 2: GitHub via `github` command (single step)
 
 ```stata
-which pte
-pte_version
-help pte
+* Install the github command first (one-time setup)
+net install github, from("https://haghish.github.io/github/")
+
+* Then install pte directly
+github install gorgeousfish/pte
+```
+
+### Method 3: GitHub via `net install`
+
+Due to Stata's per-package file limit, pte is distributed as three packages that must all be installed:
+
+```stata
+net install pte, from("https://raw.githubusercontent.com/gorgeousfish/pte/main") replace
+net install pte_more, from("https://raw.githubusercontent.com/gorgeousfish/pte/main") replace
+net install pte_more2, from("https://raw.githubusercontent.com/gorgeousfish/pte/main") replace
+```
+
+**Note for users in China:** If you experience connection timeouts, configure Stata's HTTP proxy first:
+
+```stata
+set httpproxy on
+set httpproxyhost "127.0.0.1"
+set httpproxyport YOUR_PROXY_PORT
+```
+
+Or use a GitHub mirror:
+
+```stata
+net install pte, from("https://ghfast.top/https://raw.githubusercontent.com/gorgeousfish/pte/main") replace
+net install pte_more, from("https://ghfast.top/https://raw.githubusercontent.com/gorgeousfish/pte/main") replace
+net install pte_more2, from("https://ghfast.top/https://raw.githubusercontent.com/gorgeousfish/pte/main") replace
 ```
 
 ## Quick Start
