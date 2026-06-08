@@ -14,8 +14,8 @@ display as text "  PTE Mata Library Compilation"
 display as text "============================================================"
 display as text ""
 
-// Set working directory to project root
-local project_root "/Users/cxy/Desktop/2026project/pte/pte-stata"
+// Set working directory to project root (run this script from pte-stata/)
+local project_root "`c(pwd)'"
 cd "`project_root'"
 
 // Clear all user-defined Mata functions to start fresh
