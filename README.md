@@ -818,18 +818,12 @@ the software:
 
 ## Authors
 
-**Stata Implementation:**
-
 - **Xuanyu Cai**, City University of Macau
   — [xuanyuCAI@outlook.com](mailto:xuanyuCAI@outlook.com)
 - **Wenli Xu**, City University of Macau
   — [wlxu@cityu.edu.mo](mailto:wlxu@cityu.edu.mo)
-
-**Methodology:**
-
 - **Zhiyuan Chen**, University of Zurich
 - **Moyu Liao**, City University of Macau
-- **Karl Schurter**, University of Texas at Austin
 
 ---
 
