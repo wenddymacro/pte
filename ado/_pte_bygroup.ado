@@ -57,7 +57,6 @@ program define _pte_bygroup, eclass sortpreserve
         NOTRIMeps                           /// disable eps0 winsorize
         NOLog                               /// suppress progress display
         NODIAGnose                          /// skip non-required diagnostics
-        ENGine(string)                      /// estimation engine (endopoly/mata)
         ]
     local _pte_syntax_rc = _rc
     if `_pte_syntax_rc' != 0 {
@@ -105,10 +104,6 @@ program define _pte_bygroup, eclass sortpreserve
     local _diag_opt ""
     if "`nodiagnose'" != "" {
         local _diag_opt "nodiagnose"
-    }
-    local _pf_engine_opt ""
-    if "`engine'" != "" {
-        local _pf_engine_opt "engine(`engine')"
     }
     
     // Bootstrap seed defaults to main seed
@@ -446,7 +441,7 @@ program define _pte_bygroup, eclass sortpreserve
                 lny(`depvar') free(`free') state(`state') ///
                 proxy(`proxy') pfunc(`pfunc') poly(`poly') ///
                 omegapoly(`omegapoly') dopooledz `_pf_group_stage_opt' ///
-                `_pf_control_opt' `_diag_opt' `_pf_engine_opt' noreport replace
+                `_pf_control_opt' `_diag_opt' noreport replace
 
             capture drop _pte_pf_esample
             quietly gen byte _pte_pf_esample = e(sample)
@@ -924,7 +919,7 @@ program define _pte_bygroup, eclass sortpreserve
                             lny(`depvar') free(`free') state(`state') ///
                             proxy(`proxy') pfunc(`pfunc') poly(`poly') ///
                             omegapoly(`omegapoly') dopooledz `_pf_group_stage_opt' ///
-                            `_pf_control_opt' `_diag_opt' `_pf_engine_opt' noreport replace
+                            `_pf_control_opt' `_diag_opt' noreport replace
                         
                         _pte_omega, treatment(`treatment') ///
                             omegapoly(`omegapoly') eps0window(`eps0window') ///
@@ -1035,7 +1030,7 @@ program define _pte_bygroup, eclass sortpreserve
                             lny(`depvar') free(`free') state(`state') ///
                             proxy(`proxy') pfunc(`pfunc') poly(`poly') ///
                             omegapoly(`omegapoly') dopooledz `_pf_group_stage_opt' ///
-                            `_pf_control_opt' `_diag_opt' `_pf_engine_opt' noreport replace
+                            `_pf_control_opt' `_diag_opt' noreport replace
                         
                         _pte_omega, treatment(`treatment') ///
                             omegapoly(`omegapoly') eps0window(`eps0window') ///

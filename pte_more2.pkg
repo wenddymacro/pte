@@ -57,7 +57,6 @@ f ado/_pte_timer.ado
 f ado/_pte_tl_bootstrap.ado
 f ado/_pte_tl_estimate.ado
 f ado/_pte_transition.ado
-f ado/_pte_call_endopoly_standard.ado
 f ado/_pte_treatdep_call_endopoly.ado
 f ado/_pte_treatdep_check_deps.ado
 f ado/_pte_treatdep_compare.ado

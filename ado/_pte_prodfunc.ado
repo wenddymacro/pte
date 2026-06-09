@@ -63,7 +63,6 @@ program define _pte_prodfunc, eclass
 				 DOPOOLEDZ ///
 			 LEGACYFLOATPHI ///
 			 TREATDEPENDENT ///
-			 ENGine(string) ///
 			 TOUSE(name)]
 	if _rc {
 		local _pte_syntax_rc = _rc
@@ -253,7 +252,7 @@ program define _pte_prodfunc, eclass
 	}
 	
 	// Treatment-dependent production functions use a separate execution path
-	// because endopolyprodest consumes interacted inputs rather than the
+	// because the treatdependent branch consumes interacted inputs rather than the
 	// baseline CLK moment-condition pipeline.
 	if "`treatdependent'" != "" {
 		if "`report'" == "" {
@@ -521,14 +520,14 @@ program define _pte_prodfunc, eclass
 		di as text "  Stable treated (D=1):    " as result %10.0f `n_stable_1_filtered'
 	}
 
-	// endopolyprodest treatdependent path requires a time-trend control.
+	// The treatdependent path requires a time-trend control.
 	// Use an internal name to avoid colliding with user variables.
 	capture drop _pte_t
 	qui egen double _pte_t = group(`time')
 	label variable _pte_t "PTE internal time trend (grouped `time')"
 	
 	// The treatment-dependent branch bypasses the baseline CLK GMM path and
-	// delegates estimation to endopolyprodest after the shared preprocessing.
+	// delegates estimation after the shared preprocessing.
 	if "`treatdependent'" != "" {
 		if "`report'" == "" {
 			di as text ""
@@ -561,38 +560,6 @@ program define _pte_prodfunc, eclass
 		}
 		
 		// _pte_treatdep_call_endopoly owns e(); skip the baseline GMM path below.
-	}
-	else if "`engine'" == "endopoly" {
-		// engine(endopoly) standard path: delegate to endopolyprodest without
-		// treatment interactions, faithful to paper DO industry estimation.
-		if "`report'" == "" {
-			di as text ""
-			di as text "Calling endopolyprodest (standard engine, no treatment interactions)..."
-		}
-		local _ep_pfunc = cond("`pfunc'" != "", "`pfunc'", "translog")
-		local _ep_controls "_pte_t"
-		if "`control'" != "" {
-			local _ep_controls "`_ep_controls' `control'"
-			local _ep_controls : list uniq _ep_controls
-		}
-		local _ep_call_opts "depvar(`lny') free(`free') state(`state')"
-		local _ep_call_opts "`_ep_call_opts' proxy(`proxy') control(`_ep_controls')"
-		local _ep_call_opts "`_ep_call_opts' endo(`treatment')"
-		local _ep_call_opts "`_ep_call_opts' pfunc(`_ep_pfunc') omegapoly(`omegapoly') mid(`_pte_midvar')"
-		local _ep_call_opts "`_ep_call_opts' touse(`touse')"
-		if "`report'" == "" {
-			local _ep_call_opts "`_ep_call_opts' verbose"
-		}
-		
-		capture noisily _pte_call_endopoly_standard, `_ep_call_opts'
-		if _rc {
-			local _pte_endopoly_call_rc = _rc
-			`_pte_clear_eclass'
-			`_pte_clear_estimates'
-			exit `_pte_endopoly_call_rc'
-		}
-		
-		// _pte_call_endopoly_standard owns e(); skip the baseline GMM path below.
 	}
 	else {
 	// Generate the fixed stage-1 proxy basis used by the paper and DO code.
@@ -939,7 +906,7 @@ program define _pte_prodfunc, eclass
 	
 	// Flag paths that bypassed the baseline GMM solver. These delegate
 	// estimation to an external command and own e() upon return.
-	local _pte_delegated = ("`treatdependent'" != "" | "`engine'" == "endopoly")
+	local _pte_delegated = ("`treatdependent'" != "")
 
 	// ================================================================
 	// Rebuild the final GMM estimation sample for e(sample)
@@ -1000,7 +967,7 @@ program define _pte_prodfunc, eclass
 	// Publish estimation results in e(). ereturn post must come first because
 	// it clears any previous e() payload.
 	tempname b_post V_post
-	if "`treatdependent'" != "" | "`engine'" == "endopoly" {
+	if "`treatdependent'" != "" {
 		ereturn scalar N_gmm = `N_gmm'
 		ereturn scalar omegapoly = `omegapoly'
 		ereturn local  prodfunc "`e(pfunc)'"

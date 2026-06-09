@@ -50,7 +50,6 @@ program define _pte_parallel_groups, eclass
         Balance(string)                     /// load balance: round_robin/contiguous/weighted
         Timeout(integer 0)                  /// timeout in seconds (0=none)
         BOOTstrap_parallel(integer 0)       /// bootstrap parallel workers (0=serial)
-        ENGine(string)                      /// estimation engine (endopoly/mata)
         ]
     local _pte_syntax_rc = _rc
     if `_pte_syntax_rc' != 0 {
@@ -557,7 +556,6 @@ program define _pte_parallel_groups, eclass
     global PTE_PAR_TIMEVAR "`_pte_timevar'"
     global PTE_PAR_XTDELTA "`_pte_xtdelta'"
     global PTE_PAR_TOUSEVAR "`_pte_master_touse'"
-    global PTE_PAR_ENGINE "`engine'"
     global PTE_PAR_RUNSEQ "${PTE_PAR_RUNSEQ}"
 
     // Keep grouped parallel launch aligned with the other parallel helper on

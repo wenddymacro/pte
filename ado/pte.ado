@@ -247,7 +247,6 @@ program define pte, eclass sortpreserve
          INDustry(varname) ///
          BYINDustry ///
          TREATDEPendent ///
-         ENGine(string) ///
          LAGperiods(integer 0) ///
          TARGETgroup(name) ///
          PERSISTperiods(integer 0) ///
@@ -891,23 +890,6 @@ program define pte, eclass sortpreserve
             suggestion("Remove control() and let the treatdependent branch use its internal time-trend control, matching the official DO workflow")
     }
 
-    // ─── engine() validation ───
-    if "`engine'" != "" {
-        local engine = lower(strtrim("`engine'"))
-        if !inlist("`engine'", "endopoly", "mata") {
-            _pte_error, errcode(198) ///
-                msg("engine() must be endopoly or mata") ///
-                suggestion("Use engine(endopoly) to delegate to endopolyprodest, or engine(mata) for the built-in Mata GMM solver")
-        }
-        if "`engine'" == "endopoly" {
-            capture which endopolyprodest
-            if _rc {
-                _pte_error, errcode(601) ///
-                    msg("engine(endopoly) requires the endopolyprodest package") ///
-                    suggestion("Install with: ssc install endopolyprodest")
-            }
-        }
-    }
 
     // Check only dependencies implied by the resolved option set so optional
     // branches do not block simpler estimation paths.
@@ -1502,10 +1484,6 @@ program define pte, eclass sortpreserve
             if "`replicate'" != "" {
                 local _bg_point_opts "`_bg_point_opts' replicate"
             }
-            if "`engine'" != "" {
-                local _bg_point_opts "`_bg_point_opts' engine(`engine')"
-            }
-
             capture noisily _pte_bygroup `depvar' if `_pte_touse', `_bg_point_opts'
             local _bg_point_rc = _rc
             if `_bg_point_rc' != 0 {
@@ -1659,10 +1637,6 @@ program define pte, eclass sortpreserve
             if "`replicate'" != "" {
                 local _bg_opts "`_bg_opts' replicate"
             }
-            if "`engine'" != "" {
-                local _bg_opts "`_bg_opts' engine(`engine')"
-            }
-
             capture noisily _pte_bygroup `depvar' if `_pte_touse', `_bg_opts'
             local _bg_rc = _rc
             if `_bg_rc' != 0 {
@@ -2529,9 +2503,6 @@ program define pte, eclass sortpreserve
     }
     if "`treatdependent'" != "" {
         local _pf_opts "`_pf_opts' treatdependent"
-    }
-    if "`engine'" != "" {
-        local _pf_opts "`_pf_opts' engine(`engine')"
     }
     if "`_pte_benchmark_ttrendby'" != "" {
         local _pf_opts "`_pf_opts' ttrendby(`_pte_benchmark_ttrendby')"

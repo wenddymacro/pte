@@ -53,11 +53,10 @@ program define _pte_group_worker
     local attperiods   "${PTE_PAR_ATTPERIODS}"
     local seed         "${PTE_PAR_SEED}"
     local notrimeps    "${PTE_PAR_NOTRIMEPS}"
-    local tousevar     "${PTE_PAR_TOUSEVAR}"
     local panelvar     "${PTE_PAR_PANELVAR}"
     local timevar_cfg  "${PTE_PAR_TIMEVAR}"
     local xtdelta      "${PTE_PAR_XTDELTA}"
-    local engine       "${PTE_PAR_ENGINE}"
+    local tousevar     "${PTE_PAR_TOUSEVAR}"
     
     // Build notrimeps option string
     local notrimeps_opt ""
@@ -248,9 +247,6 @@ program define _pte_group_worker
             local _pf_opts "`_pf_opts' noreport replace"
             if "`control'" != "" {
                 local _pf_opts "`_pf_opts' control(`control')"
-            }
-            if "`engine'" != "" {
-                local _pf_opts "`_pf_opts' engine(`engine')"
             }
             
             _pte_prodfunc, `_pf_opts'
