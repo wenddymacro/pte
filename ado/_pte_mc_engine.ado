@@ -1,6 +1,7 @@
-*! _pte_mc_engine.ado
+*! _pte_mc_engine.ado  v1.1.0
 *! Monte Carlo simulation engine for pte
 *! Implements outer MC loop: DGP generation -> estimation -> evaluation
+*! v1.1.0: Added compare option for Method I/II comparison via pte_compare
 
 version 14.0
 capture program drop _pte_mc_engine
@@ -17,7 +18,8 @@ program define _pte_mc_engine, rclass
          NBoot(integer 0) ///
          NOEstimate SAVing(string) ///
          Free(string) Proxy(string) State(string) ///
-         Control(string) Treatment(string)]
+         Control(string) Treatment(string) ///
+         COMpare RHOmat1(string)]
 
     // =========================================================================
     // 0. Validate inputs and load Mata helpers
@@ -93,6 +95,20 @@ program define _pte_mc_engine, rclass
     // Track failed iterations
     local nsim_failed = 0
 
+    // --- Method I/II comparison storage (if requested) ---
+    if "`compare'" != "" {
+        tempname ATT_expost ATT_endog ATT_expost_se ATT_endog_se
+        matrix `ATT_expost'    = J(`nsim', 3, .)   // 3 TWFE specs for Method I
+        matrix `ATT_endog'     = J(`nsim', 3, .)   // 3 TWFE specs for Method II
+        matrix `ATT_expost_se' = J(`nsim', 3, .)   // SE for coverage
+        matrix `ATT_endog_se'  = J(`nsim', 3, .)   // SE for coverage
+        matrix colnames `ATT_expost'    = spec1 spec2 spec3
+        matrix colnames `ATT_endog'     = spec1 spec2 spec3
+        matrix colnames `ATT_expost_se' = spec1 spec2 spec3
+        matrix colnames `ATT_endog_se'  = spec1 spec2 spec3
+        local nsim_compare_failed = 0
+    }
+
     matrix `ATT_true' = J(1, `ncols', .)
     if `order' == 1 {
         // =========================================================================
@@ -160,8 +176,15 @@ program define _pte_mc_engine, rclass
         preserve
 
         // Generate simulated data
+        // Build rhomat1 pass-through option for DGP
+        local _pte_mc_rhomat1_opt ""
+        if `"`rhomat1'"' != "" {
+            local _pte_mc_rhomat1_opt "rhomat1(`rhomat1')"
+        }
+
         cap noisily {
             _pte_mc_dgp, betamat(`betamat') rhomat(`rhomat') ///
+                `_pte_mc_rhomat1_opt' ///
                 omegamat(`omegamat') ///
                 seed(`dgp_seed') tau(`tau') ///
                 sigma_eps0(`sigma_eps0') sigma_eps1(`sigma_eps1') ///
@@ -263,6 +286,39 @@ program define _pte_mc_engine, rclass
             noi di as text "  Warning: MC iteration `m' estimation failed (rc=" _rc ")"
             restore
             continue
+        }
+
+        // -----------------------------------------------------------------
+        // Method I/II comparison via pte_compare (if requested)
+        // -----------------------------------------------------------------
+        if "`compare'" != "" {
+            // Method I: Ex-post regression
+            cap noisily {
+                qui pte_compare, method(expost)
+                matrix `ATT_expost'[`m', 1] = e(att_expost_1)
+                matrix `ATT_expost'[`m', 2] = e(att_expost_2)
+                matrix `ATT_expost'[`m', 3] = e(att_expost_3)
+                matrix `ATT_expost_se'[`m', 1] = e(se_expost_1)
+                matrix `ATT_expost_se'[`m', 2] = e(se_expost_2)
+                matrix `ATT_expost_se'[`m', 3] = e(se_expost_3)
+            }
+            if _rc != 0 {
+                local nsim_compare_failed = `nsim_compare_failed' + 1
+            }
+
+            // Method II: Endogenous productivity
+            cap noisily {
+                qui pte_compare, method(endog) omegapoly(`order')
+                matrix `ATT_endog'[`m', 1] = e(att_endog_1)
+                matrix `ATT_endog'[`m', 2] = e(att_endog_2)
+                matrix `ATT_endog'[`m', 3] = e(att_endog_3)
+                matrix `ATT_endog_se'[`m', 1] = e(se_endog_1)
+                matrix `ATT_endog_se'[`m', 2] = e(se_endog_2)
+                matrix `ATT_endog_se'[`m', 3] = e(se_endog_3)
+            }
+            if _rc != 0 {
+                local nsim_compare_failed = `nsim_compare_failed' + 1
+            }
         }
 
         // -----------------------------------------------------------------
@@ -421,6 +477,81 @@ program define _pte_mc_engine, rclass
     }
     matrix colnames `SE_RATIO' = `colnames'
 
+    // --- 4e. Compute bias/rmse/coverage for Method I/II (if compare) ---
+    if "`compare'" != "" {
+        // Reference true ATT: use the "avg" column (last column of ATT_true)
+        local _pte_mc_true_avg = `ATT_true'[1, `ncols']
+
+        tempname BIAS_expost BIAS_endog RMSE_expost RMSE_endog
+        tempname COVERAGE_expost COVERAGE_endog
+        matrix `BIAS_expost'     = J(1, 3, .)
+        matrix `BIAS_endog'      = J(1, 3, .)
+        matrix `RMSE_expost'     = J(1, 3, .)
+        matrix `RMSE_endog'      = J(1, 3, .)
+        matrix `COVERAGE_expost' = J(1, 3, .)
+        matrix `COVERAGE_endog'  = J(1, 3, .)
+
+        forvalues s = 1/3 {
+            // --- Method I (expost) ---
+            local _sum_ex = 0
+            local _sumsq_ex = 0
+            local _nvalid_ex = 0
+            local _ncover_ex = 0
+            forvalues i = 1/`nsim' {
+                if `ATT_expost'[`i', `s'] != . {
+                    local _est_ex = `ATT_expost'[`i', `s']
+                    local _sum_ex = `_sum_ex' + `_est_ex'
+                    local _sumsq_ex = `_sumsq_ex' + (`_est_ex' - `_pte_mc_true_avg')^2
+                    local _nvalid_ex = `_nvalid_ex' + 1
+                    if `ATT_expost_se'[`i', `s'] != . {
+                        local _ci_lo = `_est_ex' - 1.96 * `ATT_expost_se'[`i', `s']
+                        local _ci_hi = `_est_ex' + 1.96 * `ATT_expost_se'[`i', `s']
+                        if `_pte_mc_true_avg' >= `_ci_lo' & `_pte_mc_true_avg' <= `_ci_hi' {
+                            local _ncover_ex = `_ncover_ex' + 1
+                        }
+                    }
+                }
+            }
+            if `_nvalid_ex' > 0 {
+                matrix `BIAS_expost'[1, `s'] = `_sum_ex'/`_nvalid_ex' - `_pte_mc_true_avg'
+                matrix `RMSE_expost'[1, `s'] = sqrt(`_sumsq_ex'/`_nvalid_ex')
+                matrix `COVERAGE_expost'[1, `s'] = `_ncover_ex'/`_nvalid_ex'
+            }
+
+            // --- Method II (endog) ---
+            local _sum_en = 0
+            local _sumsq_en = 0
+            local _nvalid_en = 0
+            local _ncover_en = 0
+            forvalues i = 1/`nsim' {
+                if `ATT_endog'[`i', `s'] != . {
+                    local _est_en = `ATT_endog'[`i', `s']
+                    local _sum_en = `_sum_en' + `_est_en'
+                    local _sumsq_en = `_sumsq_en' + (`_est_en' - `_pte_mc_true_avg')^2
+                    local _nvalid_en = `_nvalid_en' + 1
+                    if `ATT_endog_se'[`i', `s'] != . {
+                        local _ci_lo = `_est_en' - 1.96 * `ATT_endog_se'[`i', `s']
+                        local _ci_hi = `_est_en' + 1.96 * `ATT_endog_se'[`i', `s']
+                        if `_pte_mc_true_avg' >= `_ci_lo' & `_pte_mc_true_avg' <= `_ci_hi' {
+                            local _ncover_en = `_ncover_en' + 1
+                        }
+                    }
+                }
+            }
+            if `_nvalid_en' > 0 {
+                matrix `BIAS_endog'[1, `s'] = `_sum_en'/`_nvalid_en' - `_pte_mc_true_avg'
+                matrix `RMSE_endog'[1, `s'] = sqrt(`_sumsq_en'/`_nvalid_en')
+                matrix `COVERAGE_endog'[1, `s'] = `_ncover_en'/`_nvalid_en'
+            }
+        }
+        matrix colnames `BIAS_expost'     = spec1 spec2 spec3
+        matrix colnames `BIAS_endog'      = spec1 spec2 spec3
+        matrix colnames `RMSE_expost'     = spec1 spec2 spec3
+        matrix colnames `RMSE_endog'      = spec1 spec2 spec3
+        matrix colnames `COVERAGE_expost' = spec1 spec2 spec3
+        matrix colnames `COVERAGE_endog'  = spec1 spec2 spec3
+    }
+
     // =========================================================================
     // 5. Final report
     // =========================================================================
@@ -453,6 +584,36 @@ program define _pte_mc_engine, rclass
             noi di as text _dup(60) "-"
             // (Replaced mata: { } block with compiled Mata function call)
             mata: _pte_mc_display_boot_table("`COVERAGE'", "`SE_RATIO'")
+        }
+
+        // --- Method I/II comparison results (if compare) ---
+        if "`compare'" != "" {
+            noi di as text ""
+            noi di as text _dup(60) "-"
+            noi di as text "  Method I/II Comparison Summary (vs CLK true ATT)"
+            noi di as text _dup(60) "-"
+            noi di as text "  Compare iterations failed: `nsim_compare_failed'"
+            noi di as text "  True ATT (avg):  " %9.6f `_pte_mc_true_avg'
+            noi di as text ""
+            noi di as text "  Method I (Ex-post TWFE):"
+            noi di as text "  Spec      Bias        RMSE        Coverage"
+            noi di as text _dup(60) "-"
+            forvalues s = 1/3 {
+                noi di as text "  Spec `s'" ///
+                    _col(12) %9.6f `BIAS_expost'[1, `s'] ///
+                    _col(24) %9.6f `RMSE_expost'[1, `s'] ///
+                    _col(36) %9.4f `COVERAGE_expost'[1, `s']
+            }
+            noi di as text ""
+            noi di as text "  Method II (Endogenous TWFE):"
+            noi di as text "  Spec      Bias        RMSE        Coverage"
+            noi di as text _dup(60) "-"
+            forvalues s = 1/3 {
+                noi di as text "  Spec `s'" ///
+                    _col(12) %9.6f `BIAS_endog'[1, `s'] ///
+                    _col(24) %9.6f `RMSE_endog'[1, `s'] ///
+                    _col(36) %9.4f `COVERAGE_endog'[1, `s']
+            }
         }
 
         noi di as text _dup(60) "="
@@ -521,6 +682,20 @@ program define _pte_mc_engine, rclass
     return matrix ATT_UB   = `ATT_UB'
     return matrix COVERAGE = `COVERAGE'
     return matrix SE_RATIO = `SE_RATIO'
+
+    // --- Method I/II comparison return values ---
+    if "`compare'" != "" {
+        return matrix ATT_expost      = `ATT_expost'
+        return matrix ATT_endog       = `ATT_endog'
+        return matrix ATT_expost_se   = `ATT_expost_se'
+        return matrix ATT_endog_se    = `ATT_endog_se'
+        return matrix BIAS_expost     = `BIAS_expost'
+        return matrix BIAS_endog      = `BIAS_endog'
+        return matrix RMSE_expost     = `RMSE_expost'
+        return matrix RMSE_endog      = `RMSE_endog'
+        return matrix COVERAGE_expost = `COVERAGE_expost'
+        return matrix COVERAGE_endog  = `COVERAGE_endog'
+    }
 
     return scalar nsim        = `nsim'
     return scalar nsim_failed = `nsim_failed'

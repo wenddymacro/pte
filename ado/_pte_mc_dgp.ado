@@ -1,9 +1,20 @@
-*! _pte_mc_dgp.ado
+*! version 1.1.0  24jun2026
+*! v1.1.0: Add rhomat1() for independent DGP support
 *! DGP data generation for Monte Carlo simulation
+*! Part of pte package (Chen, Liao & Schurter, 2026)
 *!
 *! Generates simulated panel data with known treatment effects for MC validation.
+*! Reference: DOs/mc_simulation_estimation_experiment.do L56-92
 
 version 14.0
+// =========================================================================
+// _pte_mc_dgp: Generate DGP data for Monte Carlo simulation
+// =========================================================================
+// TASK-001.6~10:  Panel structure generation
+// TASK-001.11~18: Productivity evolution (omega0, omega1)
+// TASK-001.19~22: Input/output generation (lnk, lnl, lnm, lny)
+// TASK-001.23~26: True ATT calculation
+// =========================================================================
 
 program define _pte_mc_dgp, rclass
     version 14.0
@@ -16,7 +27,8 @@ program define _pte_mc_dgp, rclass
         [TAU(real 0.06) Sigma_eps0(real 0.2) Sigma_eps1(real 0.1) ///
          Mu_v(real 0.05) Sigma_v(real 0.1) ///
          Order(integer 1) PFunc(string) ///
-         ATTperiods(integer 4) Industry(integer 0)]
+         ATTperiods(integer 4) Industry(integer 0) ///
+         RHOmat1(string)]
     
     // Default production function type
     if "`pfunc'" == "" {
@@ -32,61 +44,65 @@ program define _pte_mc_dgp, rclass
         di as error "_pte_mc_dgp: order() must be 1, 2, or 3"
         exit 198
     }
-
-    local _pte_mc_beta_rows = rowsof(`betamat')
-    local _pte_mc_rho_rows = rowsof(`rhomat')
-    local _pte_mc_omega_rows = rowsof(`omegamat')
-    if `_pte_mc_beta_rows' != `_pte_mc_rho_rows' | ///
-        `_pte_mc_beta_rows' != `_pte_mc_omega_rows' {
-        di as error "_pte_mc_dgp: betamat(), rhomat(), and omegamat() must have the same number of rows"
-        exit 198
-    }
-    if `_pte_mc_beta_rows' < 1 {
-        di as error "_pte_mc_dgp: parameter matrices must have at least one row"
-        exit 198
-    }
-
-    if `_pte_mc_beta_rows' > 1 {
-        if `industry' < 1 | `industry' > `_pte_mc_beta_rows' {
-            di as error "_pte_mc_dgp: multi-row parameter matrices require industry() selecting a row in 1..`_pte_mc_beta_rows'"
-            exit 198
-        }
-        local _pte_mc_row = `industry'
-    }
-    else {
-        if `industry' > 1 {
-            di as error "_pte_mc_dgp: industry(`industry') exceeds the available parameter rows"
-            exit 198
-        }
-        local _pte_mc_row = 1
-    }
     
     // -----------------------------------------------------------------
     // Extract parameters from input matrices
     // -----------------------------------------------------------------
-    // RHO parameters
-    local rho0 = `rhomat'[`_pte_mc_row', colnumb(`rhomat', "rho0")]
-    local rho1 = `rhomat'[`_pte_mc_row', colnumb(`rhomat', "rho1")]
+    // RHO parameters for omega0 (control/untreated state)
+    local rho0 = `rhomat'[1, colnumb(`rhomat', "rho0")]
+    local rho1 = `rhomat'[1, colnumb(`rhomat', "rho1")]
     if `order' >= 2 {
-        local rho2 = `rhomat'[`_pte_mc_row', colnumb(`rhomat', "rho2")]
+        local rho2 = `rhomat'[1, colnumb(`rhomat', "rho2")]
     }
     else {
         local rho2 = 0
     }
     if `order' >= 3 {
-        local rho3 = `rhomat'[`_pte_mc_row', colnumb(`rhomat', "rho3")]
+        local rho3 = `rhomat'[1, colnumb(`rhomat', "rho3")]
     }
     else {
         local rho3 = 0
     }
     
+    // RHO parameters for omega1 (treated state)
+    // If rhomat1() specified, use independent coefficients; otherwise reuse rhomat
+    if "`rhomat1'" != "" {
+        // Validate column count matches rhomat
+        if colsof(`rhomat1') != colsof(`rhomat') {
+            di as error "_pte_mc_dgp: rhomat1() must have same number of columns as rhomat()"
+            exit 503
+        }
+        local rho0_t = `rhomat1'[1, colnumb(`rhomat1', "rho0")]
+        local rho1_t = `rhomat1'[1, colnumb(`rhomat1', "rho1")]
+        if `order' >= 2 {
+            local rho2_t = `rhomat1'[1, colnumb(`rhomat1', "rho2")]
+        }
+        else {
+            local rho2_t = 0
+        }
+        if `order' >= 3 {
+            local rho3_t = `rhomat1'[1, colnumb(`rhomat1', "rho3")]
+        }
+        else {
+            local rho3_t = 0
+        }
+    }
+    else {
+        // Backward compatible: omega1 uses same rho as omega0
+        local rho0_t = `rho0'
+        local rho1_t = `rho1'
+        local rho2_t = `rho2'
+        local rho3_t = `rho3'
+    }
+    
     // OMEGA parameters (initial distribution)
-    local mu_omega  = `omegamat'[`_pte_mc_row', 1]
-    local sd_omega  = `omegamat'[`_pte_mc_row', 2]
+    local mu_omega  = `omegamat'[1, 1]
+    local sd_omega  = `omegamat'[1, 2]
     
     // =================================================================
-    // Panel structure — resample from current data
+    // TASK-001.6: Panel structure — resample from current data
     // =================================================================
+    // Reference: DOs/mc_simulation_estimation_experiment.do L56-58
     //   bsample, strata(treat) cluster(firm) idcluster(firm1)
     //   replace firm = firm1
     //   xtset firm year
@@ -115,7 +131,7 @@ program define _pte_mc_dgp, rclass
     local n_obs = r(N)
     
     // =================================================================
-    // Treatment status variables
+    // TASK-001.7: Treatment status variables
     // =================================================================
     // treat_post should already exist from the source data
     // Regenerate treat (firm-level) after resampling
@@ -135,21 +151,21 @@ program define _pte_mc_dgp, rclass
     qui replace treat_yr0 = . if treat == 0
     
     // =================================================================
-    // Relative time variable
+    // TASK-001.8: Relative time variable
     // =================================================================
     capture drop _pte_nt
     qui gen int _pte_nt = year - treat_yr0
     qui replace _pte_nt = . if treat == 0
     
     // =================================================================
-    // Transition period indicator
+    // TASK-001.9: Transition period indicator
     // =================================================================
     capture drop mid
     qui gen byte mid = (treat_post != L.treat_post)
     qui replace mid = 0 if missing(L.treat_post)
     
     // =================================================================
-    // Panel structure validation
+    // TASK-001.10: Panel structure validation
     // =================================================================
     // Verify absorbing treatment: D_it >= D_{it-1}
     tempvar d_check
@@ -166,9 +182,10 @@ program define _pte_mc_dgp, rclass
     local last_year  = r(max)
     
     // =================================================================
-    // omega0 initialization — ALL firms at first period
+    // TASK-001.11: omega0 initialization — ALL firms at first period
     // =================================================================
-    //   bys firm (year): g omega0 = rnormal(mu, sd) if _n==1
+    // Reference: pooled DOs/mc_simulation_estimation_experiment_pooled.do L61
+    //   bys firm (year): g omega0 = rnormal(OMG_cd[1, 1], OMG_cd[1, 2]) if _n==1
     // DGP initial states must be drawn from omegamat(), not inherited from
     // source omega values in the empirical seed sample.
     // -----------------------------------------------------------------
@@ -177,9 +194,10 @@ program define _pte_mc_dgp, rclass
     bys firm (year): gen double omega0 = rnormal(`mu_omega', `sd_omega') if _n == 1
     
     // =================================================================
-    // omega1 initialization — ONLY treated firms at e-1
+    // TASK-001.12: omega1 initialization — ONLY treated firms at e-1
     // =================================================================
-    //   g omega1 = rnormal(mu, sd) + rnormal(mu_v, sigma_v)
+    // Reference: pooled DOs/mc_simulation_estimation_experiment_pooled.do L60
+    //   g omega1 = rnormal(OMG_cd[1, 1], OMG_cd[1, 2]) + rnormal(mu_v, sigma_v)
     //       if year == treat_yr0 - 1
     // Key constraint: control firms must have omega1 = . (missing)
     // -----------------------------------------------------------------
@@ -202,9 +220,10 @@ program define _pte_mc_dgp, rclass
     }
     
     // =================================================================
-    // omega0 recursive evolution — ALL firms, ALL periods
+    // TASK-001.13: omega0 recursive evolution — ALL firms, ALL periods
     // =================================================================
-    //   replace omega0 = rho0+rho1*l.omega0 + rnormal(0, sigma_eps0) if year==time ...
+    // Reference: DOs/mc_simulation_estimation_experiment_pooled.do L64
+    //   replace omega0 = rho0+rho1*l.omega0 + rnormal(0, EPS[1,1]) if year==time ...
     // The innovation enters in the current period; only the state variable is lagged.
     // -----------------------------------------------------------------
     
@@ -215,7 +234,8 @@ program define _pte_mc_dgp, rclass
     // Recursive evolution using by-group sequential replacement
     // Use omega0[_n-1] (sequential within by-group) instead of L.omega0
     // (time-series lag) to handle panel gaps correctly.
-    // The L. operator is on omega0, not on the innovation.
+    // Reference: DOs/mc_simulation_estimation_experiment_pooled.do L64
+    // The reference code's L. operator is on omega0, not on the innovation.
     // We keep [_n-1] for the state variable to handle panel gaps, but the
     // innovation remains current-period, matching the paper/DO recursion.
     if `order' == 1 {
@@ -234,9 +254,10 @@ program define _pte_mc_dgp, rclass
     }
     
     // =================================================================
-    // omega1 recursive evolution — CRITICAL time constraint
+    // TASK-001.14: omega1 recursive evolution — CRITICAL time constraint
     // =================================================================
-    //   replace omega1 = rho0+tau+rho1*l.omega1 + rnormal(0, sigma_eps1)
+    // Reference: DOs/mc_simulation_estimation_experiment_pooled.do L65
+    //   replace omega1 = rho0+tau+rho1*l.omega1 + rnormal(0, EPS[1,2])
     //       if year==time & l.omega1!=. & time>=treat_yr0
     //
     // CRITICAL: The condition `time >= treat_yr0` prevents omega1 from
@@ -251,30 +272,33 @@ program define _pte_mc_dgp, rclass
     // omega1 evolution with time constraint: year >= treat_yr0
     // Use omega1[_n-1] for robustness with panel gaps (same as omega0 fix).
     // The tau parameter enters the evolution equation for treated state.
+    // Uses rho0_t/rho1_t/rho2_t/rho3_t which come from rhomat1() if specified,
+    // or from rhomat() otherwise (backward compatible).
     if `order' == 1 {
-        qui bys firm (year): replace omega1 = `rho0' + `tau' ///
-            + `rho1' * omega1[_n-1] ///
+        qui bys firm (year): replace omega1 = `rho0_t' + `tau' ///
+            + `rho1_t' * omega1[_n-1] ///
             + _pte_eps1 ///
             if _n > 1 & omega1[_n-1] != . & year >= treat_yr0
     }
     else if `order' == 2 {
-        qui bys firm (year): replace omega1 = `rho0' + `tau' ///
-            + `rho1' * omega1[_n-1] + `rho2' * (omega1[_n-1])^2 ///
+        qui bys firm (year): replace omega1 = `rho0_t' + `tau' ///
+            + `rho1_t' * omega1[_n-1] + `rho2_t' * (omega1[_n-1])^2 ///
             + _pte_eps1 ///
             if _n > 1 & omega1[_n-1] != . & year >= treat_yr0
     }
     else if `order' == 3 {
-        qui bys firm (year): replace omega1 = `rho0' + `tau' ///
-            + `rho1' * omega1[_n-1] + `rho2' * (omega1[_n-1])^2 ///
-            + `rho3' * (omega1[_n-1])^3 ///
+        qui bys firm (year): replace omega1 = `rho0_t' + `tau' ///
+            + `rho1_t' * omega1[_n-1] + `rho2_t' * (omega1[_n-1])^2 ///
+            + `rho3_t' * (omega1[_n-1])^3 ///
             + _pte_eps1 ///
             if _n > 1 & omega1[_n-1] != . & year >= treat_yr0
     }
     
     // =================================================================
-    // Realized productivity omega_true
+    // TASK-001.15: Realized productivity omega_true
     // =================================================================
     // omega_true = omega0 if untreated, omega1 if treated
+    // Reference: DOs/mc_simulation_estimation_experiment.do L76
     //   g omega_true = omega1*treat_post + omega0*(1-treat_post)
     // -----------------------------------------------------------------
     
@@ -283,7 +307,7 @@ program define _pte_mc_dgp, rclass
     qui replace omega_true = omega1 if treat_post == 1
     
     // =================================================================
-    // True treatment effect TT_true
+    // TASK-001.16: True treatment effect TT_true
     // =================================================================
     // TT_true = omega1 - omega0 (only defined for treated post-treatment)
     // -----------------------------------------------------------------
@@ -292,7 +316,7 @@ program define _pte_mc_dgp, rclass
     qui gen double TT_true = omega1 - omega0
     
     // =================================================================
-    // Missing value validation
+    // TASK-001.17: Missing value validation
     // =================================================================
     // Control firms: omega1 = ., TT_true = .
     // -----------------------------------------------------------------
@@ -311,7 +335,7 @@ program define _pte_mc_dgp, rclass
     }
     
     // =================================================================
-    // Numerical stability check
+    // TASK-001.18: Numerical stability check
     // =================================================================
     
     qui sum omega0
@@ -327,29 +351,30 @@ program define _pte_mc_dgp, rclass
     }
     
     // =================================================================
-    // Input/output generation
+    // TASK-001.19~22: Input/output generation
     // =================================================================
+    // Reference: DOs/mc_simulation_estimation_experiment.do L73-80
     //   lnk: inherited from resampled data
     //   lnl: inherited from resampled data (already endogenous)
     //   lnm: regenerated from omega_true/current inputs
     //   lny: regenerated using BETA and omega_true
     // -----------------------------------------------------------------
     
-    // lnk — inherited from source data
+    // TASK-001.19: lnk — inherited from source data
     capture confirm variable lnk
     if _rc {
         di as error "_pte_mc_dgp: lnk not found in data"
         exit 111
     }
     
-    // lnl — inherited from source data
+    // TASK-001.20: lnl — inherited from source data
     capture confirm variable lnl
     if _rc {
         di as error "_pte_mc_dgp: lnl not found in data"
         exit 111
     }
     
-    // lnm — regenerate proxy input following official pooled DOs
+    // TASK-001.21: lnm — regenerate proxy input following official pooled DOs
     capture confirm variable lnm
     if _rc {
         di as error "_pte_mc_dgp: lnm not found in data"
@@ -364,7 +389,8 @@ program define _pte_mc_dgp, rclass
             + 0.1 * lnk * lnl
     }
     
-    // Output lny generation using BETA and omega_true
+    // TASK-001.22: Output lny generation using BETA and omega_true
+    // Reference: DOs/mc_simulation_estimation_experiment.do L73-80
     //   gen lny = BETA[i,1]*t + BETA[i,2]*lnl + BETA[i,3]*lnk
     //           + BETA[i,4]*(lnl^2) + BETA[i,5]*(lnk^2) + BETA[i,6]*(lnl*lnk)
     //           + omega0 if treat_post==0
@@ -382,10 +408,10 @@ program define _pte_mc_dgp, rclass
         capture confirm variable t
         if !_rc {
             // Single time trend (reference code style)
-            qui gen double lny = `betamat'[`_pte_mc_row',1] * t ///
-                + `betamat'[`_pte_mc_row',2] * lnl + `betamat'[`_pte_mc_row',3] * lnk ///
-                + `betamat'[`_pte_mc_row',4] * (lnl^2) + `betamat'[`_pte_mc_row',5] * (lnk^2) ///
-                + `betamat'[`_pte_mc_row',6] * (lnl * lnk) ///
+            qui gen double lny = `betamat'[1,1] * t ///
+                + `betamat'[1,2] * lnl + `betamat'[1,3] * lnk ///
+                + `betamat'[1,4] * (lnl^2) + `betamat'[1,5] * (lnk^2) ///
+                + `betamat'[1,6] * (lnl * lnk) ///
                 + omega_true + rnormal(0, 0.1)
         }
         else {
@@ -395,13 +421,13 @@ program define _pte_mc_dgp, rclass
             forv j = 1/6 {
                 capture confirm variable t`j'
                 if !_rc {
-                    qui replace lny = lny + `betamat'[`_pte_mc_row', `j'] * t`j'
+                    qui replace lny = lny + `betamat'[1, `j'] * t`j'
                 }
             }
             qui replace lny = lny ///
-                + `betamat'[`_pte_mc_row', 7] * lnl + `betamat'[`_pte_mc_row', 8] * lnk ///
-                + `betamat'[`_pte_mc_row', 9] * (lnl^2) + `betamat'[`_pte_mc_row', 10] * (lnk^2) ///
-                + `betamat'[`_pte_mc_row', 11] * (lnl * lnk) ///
+                + `betamat'[1, 7] * lnl + `betamat'[1, 8] * lnk ///
+                + `betamat'[1, 9] * (lnl^2) + `betamat'[1, 10] * (lnk^2) ///
+                + `betamat'[1, 11] * (lnl * lnk) ///
                 + omega_true + rnormal(0, 0.1)
         }
     }
@@ -410,15 +436,15 @@ program define _pte_mc_dgp, rclass
         // BETA columns: bt bl bk
         capture confirm variable t
         if !_rc {
-            qui gen double lny = `betamat'[`_pte_mc_row',1] * t ///
-                + `betamat'[`_pte_mc_row',2] * lnl + `betamat'[`_pte_mc_row',3] * lnk ///
+            qui gen double lny = `betamat'[1,1] * t ///
+                + `betamat'[1,2] * lnl + `betamat'[1,3] * lnk ///
                 + omega_true + rnormal(0, 0.1)
         }
         else {
             capture confirm variable t1
             if !_rc {
-                qui gen double lny = `betamat'[`_pte_mc_row',1] * t1 ///
-                    + `betamat'[`_pte_mc_row',2] * lnl + `betamat'[`_pte_mc_row',3] * lnk ///
+                qui gen double lny = `betamat'[1,1] * t1 ///
+                    + `betamat'[1,2] * lnl + `betamat'[1,3] * lnk ///
                     + omega_true + rnormal(0, 0.1)
             }
         }
@@ -437,8 +463,9 @@ program define _pte_mc_dgp, rclass
     qui gen double m1k1 = lnm * lnk
     
     // =================================================================
-    // True ATT calculation by relative time
+    // TASK-001.23~24: True ATT calculation by relative time
     // =================================================================
+    // Reference: DOs/mc_simulation_estimation_experiment.do L82-90
     //   g omg_tt = omega1 - omega0
     //   tabstat omg_att if nt>=0, by(nt) stat(mean) save
     //   matrix ATT_true = (r(Stat1), ..., r(StatTotal))
@@ -477,7 +504,7 @@ program define _pte_mc_dgp, rclass
     matrix colnames `ATT_true' = `cnames'
     
     // =================================================================
-    // Analytical ATT verification (order=1 only)
+    // TASK-001.25: Analytical ATT verification (order=1 only)
     // =================================================================
     // For order=1 linear evolution:
     //   ATT_ell = tau * (1 - rho1^(ell+1)) / (1 - rho1)
@@ -486,7 +513,7 @@ program define _pte_mc_dgp, rclass
     
     if `order' == 1 {
         forv ell = 0/`L' {
-            local att_analytical = `tau' * (1 - `rho1'^(`ell' + 1)) / (1 - `rho1')
+            local att_analytical = `tau' * (1 - `rho1_t'^(`ell' + 1)) / (1 - `rho1_t')
             local att_simulated = `ATT_true'[1, `ell' + 1]
             local att_diff = abs(`att_simulated' - `att_analytical')
             if `att_diff' > 0.05 {
@@ -498,7 +525,7 @@ program define _pte_mc_dgp, rclass
     }
     
     // =================================================================
-    // Result storage and return values
+    // TASK-001.26: Result storage and return values
     // =================================================================
     
     // Count treated and control firms
