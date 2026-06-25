@@ -1,7 +1,10 @@
-*! _pte_compare_expost.ado
+*! version 1.0.0  01jan2026
+*! _pte_compare_expost.ado v1.0
 *! Ex-post Regression + TWFE Implementation (Method I)
+*! US-E7-008: Exogenous productivity process + TWFE ATT estimation
 *!
 *! Theory: Paper Section 5, Section 6.4.3, Equations (18)-(19)
+*! Reference: DOs/prodest_acf_trlg_exog.do, DOs/att_estimation_simulation_r1.do L143-254
 *!
 *! Key differences from CLK (pte main):
 *!   - GMM: 4-column OMEGA_lag_pol (no interaction terms)
@@ -44,30 +47,6 @@ program define _pte_compare_expost, eclass
         di as error "Please install: {stata ssc install reghdfe}"
         exit 601
     }
-
-    // pte_compare is postestimation for the active pte fit. Method I keeps
-    // transition observations, but it must not leave the caller's pte sample.
-    capture confirm variable _pte_active_sample, exact
-    if _rc {
-        di as error "Error 459: active pte sample marker _pte_active_sample not found."
-        di as error "Re-run {bf:pte} on the current data before {bf:pte_compare}."
-        exit 459
-    }
-    capture confirm numeric variable _pte_active_sample
-    if _rc {
-        di as error "Error 459: active pte sample marker _pte_active_sample must be numeric."
-        di as error "Re-run {bf:pte} on the current data before {bf:pte_compare}."
-        exit 459
-    }
-    tempvar _pte_compare_active_sample
-    qui gen byte `_pte_compare_active_sample' = ///
-        (_pte_active_sample != 0 & !missing(_pte_active_sample))
-    qui count if `_pte_compare_active_sample'
-    if r(N) == 0 {
-        di as error "Error 459: active pte sample marker _pte_active_sample is empty."
-        di as error "Re-run {bf:pte} on the current data before {bf:pte_compare}."
-        exit 459
-    }
     
     // Save pte results before they get overwritten
     local pte_free    "`e(free)'"
@@ -77,27 +56,6 @@ program define _pte_compare_expost, eclass
     local pte_panelvar "`e(panelvar)'"
     local pte_timevar  "`e(timevar)'"
     local pte_prodfunc "`e(prodfunc)'"
-    local pte_xtdelta ""
-    tempname _pte_compare_live_xtdelta
-    capture scalar `_pte_compare_live_xtdelta' = e(xtdelta)
-    if _rc == 0 & !missing(`_pte_compare_live_xtdelta') {
-        local pte_xtdelta = strofreal(`_pte_compare_live_xtdelta')
-    }
-    local _pte_compare_live_delta_opt ""
-    if "`pte_xtdelta'" != "" {
-        local _pte_compare_live_delta_opt ", delta(`pte_xtdelta')"
-    }
-    local _pte_compare_had_xtset 0
-    local _pte_compare_prev_panel ""
-    local _pte_compare_prev_time ""
-    local _pte_compare_prev_delta ""
-    capture quietly xtset
-    if _rc == 0 {
-        local _pte_compare_had_xtset 1
-        local _pte_compare_prev_panel "`r(panelvar)'"
-        local _pte_compare_prev_time "`r(timevar)'"
-        local _pte_compare_prev_delta "`r(tdelta)'"
-    }
     
     // Default specs: all three
     if "`specs'" == "" local specs "1 2 3"
@@ -111,7 +69,7 @@ program define _pte_compare_expost, eclass
     
     di as text ""
     di as text "{hline 70}"
-    di as text "  Ex-post Regression (Method I)"
+    di as text "  Ex-post Regression (Method I) - US-E7-008"
     di as text "{hline 70}"
     di as text ""
     
@@ -123,9 +81,9 @@ program define _pte_compare_expost, eclass
     
     // Preserve data for GMM estimation
     preserve
-    qui keep if `_pte_compare_active_sample'
     
     // Generate polynomial variables for first stage
+    // Reference: DOs/prodest_acf_trlg_exog.do L12-25
     local l "`pte_free'"
     local k "`pte_state'"
     local m "`pte_proxy'"
@@ -140,8 +98,9 @@ program define _pte_compare_expost, eclass
     qui gen long t = `_pte_cmp_t'
     label variable t "PTE compare internal grouped time trend"
     
-    cap drop l1 l2 l3 k1 k2 k3 m1 m2 m3
-    cap drop l1m1 l1k1 m1k1 l1m2 l1k2 m1k2 m1l2 k1l2 k1m2 k1l1m1
+    foreach _v in l1 l2 l3 k1 k2 k3 m1 m2 m3 l1m1 l1k1 m1k1 l1m2 l1k2 m1k2 m1l2 k1l2 k1m2 k1l1m1 {
+        cap drop `_v'
+    }
     
     qui gen double l1 = `l'
     qui gen double l2 = `l'^2
@@ -164,6 +123,7 @@ program define _pte_compare_expost, eclass
     qui gen double k1l1m1 = `k' * `m' * `l'
     
     // First-stage regression: phi = E[y | l_poly, k_poly, m_poly, t]
+    // Reference: DOs/prodest_acf_trlg_exog.do L28-30
     qui reg `y' l1* m1* k1* k2* l2* m2* k3 l3 m3 t
     cap drop phi
     qui predict double phi
@@ -171,21 +131,15 @@ program define _pte_compare_expost, eclass
     // Remove time trend (subtract controls, NOT input variables)
     scalar _pte_beta_t_expost = _b[t]
     qui replace phi = phi - _pte_beta_t_expost * t
-
-    // Preserve the method-specific first-stage phi before the GMM prep drops
-    // lagless rows. Method I's omega must be built from this ex-post phi, not
-    // from the active pte run's CLK-corrected _pte_phi.
-    tempfile _pte_compare_expost_phi
-    sort `pte_panelvar' `pte_timevar'
-    quietly save `"_pte_compare_expost_phi"', replace
     
     // OLS initial values for GMM
     qui reg `y' `l' `k' l2 k2 l1k1 t
     
     // Ensure panel is set
-    qui xtset `pte_panelvar' `pte_timevar'`_pte_compare_live_delta_opt'
+    qui xtset `pte_panelvar' `pte_timevar'
     
     // Generate lagged variables for GMM
+    // Reference: DOs/prodest_acf_trlg_exog.do L46-52
     cap drop *_lag
     foreach var in phi `k' `l' `m' l2 k2 l1k1 `treatment' _pte_mid {
         cap gen double `var'_lag = L.`var'
@@ -196,48 +150,35 @@ program define _pte_compare_expost, eclass
     qui gen double const = 1
     
     // Drop first period (no lag available)
+    // Reference: DOs/prodest_acf_trlg_exog.do L53
     qui bys `pte_panelvar' (t): drop if _n == 1
-
-    // The bysort above leaves the data ordered by the grouped time-trend t
-    // rather than the active xtset clock. Re-sort on the live panel key
-    // before using additional L. operators.
-    qui sort `pte_panelvar' `pte_timevar'
-
-    // When the active pte contract already uses the canonical lnl/lnk names,
-    // the Mata alias block must not drop the live source columns and then try
-    // to rebuild them from their own erased names.
-    local _pte_l_src "`l'"
-    local _pte_k_src "`k'"
-    local _pte_l_lag_src "`l'_lag"
-    local _pte_k_lag_src "`k'_lag"
-    if "`l'" == "lnl" {
-        tempvar _pte_l_src_hold _pte_l_lag_hold
-        qui gen double `_pte_l_src_hold' = `l'
-        qui gen double `_pte_l_lag_hold' = `l'_lag
-        local _pte_l_src "`_pte_l_src_hold'"
-        local _pte_l_lag_src "`_pte_l_lag_hold'"
-    }
-    if "`k'" == "lnk" {
-        tempvar _pte_k_src_hold _pte_k_lag_hold
-        qui gen double `_pte_k_src_hold' = `k'
-        qui gen double `_pte_k_lag_hold' = `k'_lag
-        local _pte_k_src "`_pte_k_src_hold'"
-        local _pte_k_lag_src "`_pte_k_lag_hold'"
-    }
     
     // Rename for Mata compatibility
     // Mata reads: lnl, lnk, l2, k2, l1k1, phi, phi_lag, etc.
-    foreach _pte_alias in lnl lnk lnl_lag lnk_lag l2_lag k2_lag l1k1_lag phi_lag {
-        capture drop `_pte_alias'
-    }
-    qui gen double lnl = `_pte_l_src'
-    qui gen double lnk = `_pte_k_src'
-    qui gen double lnl_lag = `_pte_l_lag_src'
-    qui gen double lnk_lag = `_pte_k_lag_src'
+    // FIX: When free="lnl" or state="lnk", the alias IS the source variable.
+    // Dropping then recreating from itself causes rc=111 "not found".
+    // Only drop/recreate aliases that differ from the source variable name.
+    capture drop l2_lag
+    capture drop k2_lag
+    capture drop l1k1_lag
+    capture drop phi_lag
+    qui sort `pte_panelvar' `pte_timevar'
     qui gen double l2_lag = L.l2
     qui gen double k2_lag = L.k2
     qui gen double l1k1_lag = L.l1k1
     qui gen double phi_lag = L.phi
+    if "`l'" != "lnl" {
+        capture drop lnl
+        capture drop lnl_lag
+        qui gen double lnl = `l'
+        qui gen double lnl_lag = `l'_lag
+    }
+    if "`k'" != "lnk" {
+        capture drop lnk
+        capture drop lnk_lag
+        qui gen double lnk = `k'
+        qui gen double lnk_lag = `k'_lag
+    }
     
     // Drop observations with missing lags
     qui drop if missing(phi_lag) | missing(lnl_lag) | missing(lnk_lag)
@@ -256,27 +197,25 @@ program define _pte_compare_expost, eclass
     cap mata: mata drop _pte_gmm_expost()
     cap mata: mata drop _pte_model_expost()
     
-    // Resolve the companion Mata source from adopath/project root instead of
-    // assuming the caller's current working directory has a sibling ado/ tree.
+    // Find the mata file via adopath
     local mata_file ""
-    capture quietly _pte_mata_findpath, file(_pte_compare_expost_gmm.mata)
-    if _rc == 0 & r(found) == 1 {
-        local mata_file `"`r(filepath)'"'
+    cap qui findfile _pte_compare_expost_gmm.mata
+    if !_rc {
+        local mata_file "`r(fn)'"
+    }
+    else {
+        // Fallback: check relative paths
+        foreach dir in "." "ado" {
+            cap confirm file "`dir'/_pte_compare_expost_gmm.mata"
+            if !_rc {
+                local mata_file "`dir'/_pte_compare_expost_gmm.mata"
+                continue, break
+            }
+        }
     }
     
-    if `"`mata_file'"' == "" {
+    if "`mata_file'" == "" {
         di as error "Error: Cannot find _pte_compare_expost_gmm.mata"
-        restore
-        if `_pte_compare_had_xtset' {
-            local _pte_compare_restore_delta_opt ""
-            if `"`_pte_compare_prev_delta'"' != "" {
-                local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-            }
-            capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-        }
-        else {
-            capture quietly xtset, clear
-        }
         exit 601
     }
     
@@ -313,58 +252,27 @@ program define _pte_compare_expost, eclass
     di as text "  Step 2: Recovering ex-post productivity (omega_exg)..."
     
     // omega_exg = phi - beta_l*l - beta_k*k - beta_ll*l^2 - beta_kk*k^2 - beta_lk*l*k
+    // Reference: DOs/att_estimation_simulation_r1.do L157
     
-    capture drop _pte_phi_expost_cmp
-    tempvar _pte_phi_master_hold
-    local _pte_compare_has_master_phi = 0
-    capture confirm variable phi, exact
-    if !_rc {
-        local _pte_compare_has_master_phi = 1
-        rename phi `_pte_phi_master_hold'
-    }
-    capture noisily merge 1:1 `pte_panelvar' `pte_timevar' using `"_pte_compare_expost_phi"', ///
-        nogen keep(master match) keepusing(phi)
-    local _pte_compare_merge_rc = _rc
-    if `_pte_compare_merge_rc' == 0 {
-        rename phi _pte_phi_expost_cmp
-    }
-    if `_pte_compare_has_master_phi' {
-        rename `_pte_phi_master_hold' phi
-    }
-    if `_pte_compare_merge_rc' {
-        if `_pte_compare_had_xtset' {
-            local _pte_compare_restore_delta_opt ""
-            if `"`_pte_compare_prev_delta'"' != "" {
-                local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-            }
-            capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-        }
-        else {
-            capture quietly xtset, clear
-        }
-        exit `_pte_compare_merge_rc'
-    }
-
     cap drop _pte_omega_exg _pte_omega_exg2 _pte_omega_exg3
     
-    qui gen double _pte_omega_exg = _pte_phi_expost_cmp ///
+    qui gen double _pte_omega_exg = _pte_phi ///
         - _pte_expost_bl  * `pte_free' ///
         - _pte_expost_bk  * `pte_state' ///
         - _pte_expost_bll * `pte_free'^2 ///
         - _pte_expost_bkk * `pte_state'^2 ///
-        - _pte_expost_blk * `pte_free' * `pte_state' ///
-        if `_pte_compare_active_sample'
+        - _pte_expost_blk * `pte_free' * `pte_state'
     
     // Generate polynomial terms
+    // Reference: DOs/att_estimation_simulation_r1.do L179-180
     qui gen double _pte_omega_exg2 = _pte_omega_exg^2
     qui gen double _pte_omega_exg3 = _pte_omega_exg^3
     
     label variable _pte_omega_exg  "Ex-post productivity (omega_exg)"
     label variable _pte_omega_exg2 "omega_exg squared"
     label variable _pte_omega_exg3 "omega_exg cubed"
-    capture drop _pte_phi_expost_cmp
     
-    qui count if `_pte_compare_active_sample' & !missing(_pte_omega_exg)
+    qui count if !missing(_pte_omega_exg)
     di as text "    omega_exg recovered: N = " r(N)
     
     // =========================================================================
@@ -375,20 +283,20 @@ program define _pte_compare_expost, eclass
     di as text "  Step 3: TWFE regressions..."
     
     // Ensure panel is set
-    qui xtset `pte_panelvar' `pte_timevar'`_pte_compare_live_delta_opt'
+    qui xtset `pte_panelvar' `pte_timevar'
     
-    // Equation (18) in pte_paper.md uses the contemporaneous treatment
-    // indicator. Keep lagtreatment as an explicit replication/compatibility
-    // switch for DO paths that used L.treatment.
+    // Determine treatment variable
+    // Default: current period D_it (paper Eq.18, 疑点54 confirmed)
+    // lagtreatment option: L.D for replication compatibility
     local treat_var "`treatment'"
-    local treatment_label "`treatment' (contemporaneous, Eq. 18)"
     if "`lagtreatment'" != "" {
-        local treat_var "L.`treatment'"
-        local treatment_label "L.`treatment' (lagged, compatibility)"
-        di as text "    Using lagged treatment (L.`treatment')"
+        tempvar L_treat
+        qui gen double `L_treat' = L.`treatment'
+        local treat_var "`L_treat'"
+        di as text "    Using lagged treatment (L.`treatment') for replication"
     }
     else {
-        di as text "    Using contemporaneous treatment (`treatment') per Eq. (18)"
+        di as text "    Using current treatment (`treatment') per paper Eq.(18)"
     }
     di as text "    Absorb: `absorb'"
     
@@ -399,227 +307,67 @@ program define _pte_compare_expost, eclass
     matrix `ci_mat'   = J(3, 2, .)
     matrix `r2_mat'   = J(1, 3, .)
     matrix `n_mat'    = J(1, 3, .)
-    tempvar _pte_compare_esample
-    local _pte_compare_esample_ready = 0
     
     // Run each specification
+    // Reference: DOs/att_estimation_simulation_r1.do L188-204
     foreach s of local specs {
         
         if `s' == 1 {
             // Spec 1: No controls (m1)
             // reghdfe omega_exg [L.]treat_post, absorb(firm year)
-            capture noisily reghdfe _pte_omega_exg `treat_var' ///
-                if `_pte_compare_active_sample', ///
+            qui reghdfe _pte_omega_exg `treat_var', ///
                 absorb(`absorb') `vce_opt'
-            local _pte_compare_reg_rc = _rc
-            if `_pte_compare_reg_rc' {
-                if `_pte_compare_had_xtset' {
-                    local _pte_compare_restore_delta_opt ""
-                    if `"`_pte_compare_prev_delta'"' != "" {
-                        local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-                    }
-                    capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-                }
-                else {
-                    capture quietly xtset, clear
-                }
-                exit `_pte_compare_reg_rc'
-            }
             
-            local coef_s1 = _b[`treat_var']
-            local se_s1   = _se[`treat_var']
-            local r2_s1   = e(r2_a)
-            local n_s1    = e(N)
-
-            matrix `coef_mat'[1, 1] = `coef_s1'
-            matrix `se_mat'[1, 1]   = `se_s1'
-            matrix `ci_mat'[1, 1]   = `coef_s1' - 1.96 * `se_s1'
-            matrix `ci_mat'[1, 2]   = `coef_s1' + 1.96 * `se_s1'
-            matrix `r2_mat'[1, 1]   = `r2_s1'
-            matrix `n_mat'[1, 1]    = `n_s1'
-
-            if !`_pte_compare_esample_ready' {
-                capture quietly gen byte `_pte_compare_esample' = e(sample)
-                local _pte_compare_esample_rc = _rc
-                if `_pte_compare_esample_rc' {
-                    if `_pte_compare_had_xtset' {
-                        local _pte_compare_restore_delta_opt ""
-                        if `"`_pte_compare_prev_delta'"' != "" {
-                            local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-                        }
-                        capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-                    }
-                    else {
-                        capture quietly xtset, clear
-                    }
-                    exit `_pte_compare_esample_rc'
-                }
-                local _pte_compare_esample_ready = 1
-            }
+            matrix `coef_mat'[1, 1] = _b[`treat_var']
+            matrix `se_mat'[1, 1]   = _se[`treat_var']
+            matrix `ci_mat'[1, 1]   = _b[`treat_var'] - 1.96 * _se[`treat_var']
+            matrix `ci_mat'[1, 2]   = _b[`treat_var'] + 1.96 * _se[`treat_var']
+            matrix `r2_mat'[1, 1]   = e(r2_a)
+            matrix `n_mat'[1, 1]    = e(N)
             
-            capture estimates store _expost_m1, nocopy
-            local _pte_compare_store_rc = _rc
-            if `_pte_compare_store_rc' {
-                if `_pte_compare_had_xtset' {
-                    local _pte_compare_restore_delta_opt ""
-                    if `"`_pte_compare_prev_delta'"' != "" {
-                        local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-                    }
-                    capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-                }
-                else {
-                    capture quietly xtset, clear
-                }
-                exit `_pte_compare_store_rc'
-            }
+            estimates store _expost_m1
             
             di as text "    Spec 1 (no control): delta = " ///
-                %9.4f `coef_s1' " (SE = " %9.4f `se_s1' ")"
+                %9.4f `coef_mat'[1,1] " (SE = " %9.4f `se_mat'[1,1] ")"
         }
         
         if `s' == 2 {
             // Spec 2: 1st order lag (m2)
             // reghdfe omega_exg L.omega_exg [L.]treat_post, absorb(firm year)
-            capture noisily reghdfe _pte_omega_exg L._pte_omega_exg `treat_var' ///
-                if `_pte_compare_active_sample', ///
+            qui reghdfe _pte_omega_exg L._pte_omega_exg `treat_var', ///
                 absorb(`absorb') `vce_opt'
-            local _pte_compare_reg_rc = _rc
-            if `_pte_compare_reg_rc' {
-                if `_pte_compare_had_xtset' {
-                    local _pte_compare_restore_delta_opt ""
-                    if `"`_pte_compare_prev_delta'"' != "" {
-                        local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-                    }
-                    capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-                }
-                else {
-                    capture quietly xtset, clear
-                }
-                exit `_pte_compare_reg_rc'
-            }
             
-            local coef_s2 = _b[`treat_var']
-            local se_s2   = _se[`treat_var']
-            local r2_s2   = e(r2_a)
-            local n_s2    = e(N)
-
-            matrix `coef_mat'[1, 2] = `coef_s2'
-            matrix `se_mat'[1, 2]   = `se_s2'
-            matrix `ci_mat'[2, 1]   = `coef_s2' - 1.96 * `se_s2'
-            matrix `ci_mat'[2, 2]   = `coef_s2' + 1.96 * `se_s2'
-            matrix `r2_mat'[1, 2]   = `r2_s2'
-            matrix `n_mat'[1, 2]    = `n_s2'
-
-            if !`_pte_compare_esample_ready' {
-                capture quietly gen byte `_pte_compare_esample' = e(sample)
-                local _pte_compare_esample_rc = _rc
-                if `_pte_compare_esample_rc' {
-                    if `_pte_compare_had_xtset' {
-                        local _pte_compare_restore_delta_opt ""
-                        if `"`_pte_compare_prev_delta'"' != "" {
-                            local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-                        }
-                        capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-                    }
-                    else {
-                        capture quietly xtset, clear
-                    }
-                    exit `_pte_compare_esample_rc'
-                }
-                local _pte_compare_esample_ready = 1
-            }
+            matrix `coef_mat'[1, 2] = _b[`treat_var']
+            matrix `se_mat'[1, 2]   = _se[`treat_var']
+            matrix `ci_mat'[2, 1]   = _b[`treat_var'] - 1.96 * _se[`treat_var']
+            matrix `ci_mat'[2, 2]   = _b[`treat_var'] + 1.96 * _se[`treat_var']
+            matrix `r2_mat'[1, 2]   = e(r2_a)
+            matrix `n_mat'[1, 2]    = e(N)
             
-            capture estimates store _expost_m2, nocopy
-            local _pte_compare_store_rc = _rc
-            if `_pte_compare_store_rc' {
-                if `_pte_compare_had_xtset' {
-                    local _pte_compare_restore_delta_opt ""
-                    if `"`_pte_compare_prev_delta'"' != "" {
-                        local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-                    }
-                    capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-                }
-                else {
-                    capture quietly xtset, clear
-                }
-                exit `_pte_compare_store_rc'
-            }
+            estimates store _expost_m2
             
             di as text "    Spec 2 (1st order): delta = " ///
-                %9.4f `coef_s2' " (SE = " %9.4f `se_s2' ")"
+                %9.4f `coef_mat'[1,2] " (SE = " %9.4f `se_mat'[1,2] ")"
         }
         
         if `s' == 3 {
             // Spec 3: 3rd order polynomial (m3)
             // reghdfe omega_exg L.omega_exg L.omega_exg2 L.omega_exg3 [L.]treat_post, absorb(firm year)
-            capture noisily reghdfe _pte_omega_exg L._pte_omega_exg ///
-                L._pte_omega_exg2 L._pte_omega_exg3 `treat_var' ///
-                if `_pte_compare_active_sample', ///
+            qui reghdfe _pte_omega_exg L._pte_omega_exg ///
+                L._pte_omega_exg2 L._pte_omega_exg3 `treat_var', ///
                 absorb(`absorb') `vce_opt'
-            local _pte_compare_reg_rc = _rc
-            if `_pte_compare_reg_rc' {
-                if `_pte_compare_had_xtset' {
-                    local _pte_compare_restore_delta_opt ""
-                    if `"`_pte_compare_prev_delta'"' != "" {
-                        local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-                    }
-                    capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-                }
-                else {
-                    capture quietly xtset, clear
-                }
-                exit `_pte_compare_reg_rc'
-            }
             
-            local coef_s3 = _b[`treat_var']
-            local se_s3   = _se[`treat_var']
-            local r2_s3   = e(r2_a)
-            local n_s3    = e(N)
-
-            matrix `coef_mat'[1, 3] = `coef_s3'
-            matrix `se_mat'[1, 3]   = `se_s3'
-            matrix `ci_mat'[3, 1]   = `coef_s3' - 1.96 * `se_s3'
-            matrix `ci_mat'[3, 2]   = `coef_s3' + 1.96 * `se_s3'
-            matrix `r2_mat'[1, 3]   = `r2_s3'
-            matrix `n_mat'[1, 3]    = `n_s3'
-
-            if !`_pte_compare_esample_ready' {
-                capture quietly gen byte `_pte_compare_esample' = e(sample)
-                local _pte_compare_esample_rc = _rc
-                if `_pte_compare_esample_rc' {
-                    if `_pte_compare_had_xtset' {
-                        local _pte_compare_restore_delta_opt ""
-                        if `"`_pte_compare_prev_delta'"' != "" {
-                            local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-                        }
-                        capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-                    }
-                    else {
-                        capture quietly xtset, clear
-                    }
-                    exit `_pte_compare_esample_rc'
-                }
-                local _pte_compare_esample_ready = 1
-            }
+            matrix `coef_mat'[1, 3] = _b[`treat_var']
+            matrix `se_mat'[1, 3]   = _se[`treat_var']
+            matrix `ci_mat'[3, 1]   = _b[`treat_var'] - 1.96 * _se[`treat_var']
+            matrix `ci_mat'[3, 2]   = _b[`treat_var'] + 1.96 * _se[`treat_var']
+            matrix `r2_mat'[1, 3]   = e(r2_a)
+            matrix `n_mat'[1, 3]    = e(N)
             
-            capture estimates store _expost_m3, nocopy
-            local _pte_compare_store_rc = _rc
-            if `_pte_compare_store_rc' {
-                if `_pte_compare_had_xtset' {
-                    local _pte_compare_restore_delta_opt ""
-                    if `"`_pte_compare_prev_delta'"' != "" {
-                        local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-                    }
-                    capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-                }
-                else {
-                    capture quietly xtset, clear
-                }
-                exit `_pte_compare_store_rc'
-            }
+            estimates store _expost_m3
             
             di as text "    Spec 3 (3rd order): delta = " ///
-                %9.4f `coef_s3' " (SE = " %9.4f `se_s3' ")"
+                %9.4f `coef_mat'[1,3] " (SE = " %9.4f `se_mat'[1,3] ")"
         }
     }
     
@@ -635,7 +383,12 @@ program define _pte_compare_expost, eclass
         di as text ""
         di as text "  Production function: Translog (exogenous productivity)"
         di as text "  Absorb: `absorb'"
-        di as text "  Treatment: `treatment_label'"
+        if "`lagtreatment'" != "" {
+            di as text "  Treatment: L.`treatment' (lagged)"
+        }
+        else {
+            di as text "  Treatment: `treatment' (current period)"
+        }
         di as text ""
         di as text "  {hline 66}"
         di as text "                        No Control    1st Order    3rd Order"
@@ -757,43 +510,9 @@ program define _pte_compare_expost, eclass
     matrix colnames `ci_mat'   = ci_lower ci_upper
     matrix colnames `r2_mat'   = spec1 spec2 spec3
     matrix colnames `n_mat'    = spec1 spec2 spec3
-    if !`_pte_compare_esample_ready' {
-        local _pte_compare_esample_rc = 459
-    }
-    else {
-        capture confirm variable `_pte_compare_esample', exact
-        local _pte_compare_esample_rc = _rc
-    }
-    if `_pte_compare_esample_rc' {
-        if `_pte_compare_had_xtset' {
-            local _pte_compare_restore_delta_opt ""
-            if `"`_pte_compare_prev_delta'"' != "" {
-                local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-            }
-            capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-        }
-        else {
-            capture quietly xtset, clear
-        }
-        exit `_pte_compare_esample_rc'
-    }
-
-    // Method I temporarily aligns xtset to the active pte panel contract so
-    // L. operators track the comparison design from the paper/DO scripts, but
-    // the public compare command must leave the caller's ambient xtset state
-    // exactly as it found it.
-    if `_pte_compare_had_xtset' {
-        local _pte_compare_restore_delta_opt ""
-        if `"`_pte_compare_prev_delta'"' != "" {
-            local _pte_compare_restore_delta_opt "delta(`_pte_compare_prev_delta')"
-        }
-        capture quietly xtset `_pte_compare_prev_panel' `_pte_compare_prev_time', `_pte_compare_restore_delta_opt'
-    }
-    else {
-        capture quietly xtset, clear
-    }
     
-    ereturn post, esample(`_pte_compare_esample')
+    ereturn clear
+    ereturn post, esample()
     
     // Scalars
     ereturn scalar att_expost_1 = `coef_mat'[1, 1]

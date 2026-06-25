@@ -125,8 +125,8 @@ program define _pte_mc_dgp, rclass
     qui tsset firm year
     
     // Store panel dimensions
-    qui distinct firm
-    local n_firms = r(ndistinct)
+    qui tab firm
+    local n_firms = r(r)
     qui count
     local n_obs = r(N)
     
@@ -194,32 +194,6 @@ program define _pte_mc_dgp, rclass
     bys firm (year): gen double omega0 = rnormal(`mu_omega', `sd_omega') if _n == 1
     
     // =================================================================
-    // TASK-001.12: omega1 initialization — ONLY treated firms at e-1
-    // =================================================================
-    // Reference: pooled DOs/mc_simulation_estimation_experiment_pooled.do L60
-    //   g omega1 = rnormal(OMG_cd[1, 1], OMG_cd[1, 2]) + rnormal(mu_v, sigma_v)
-    //       if year == treat_yr0 - 1
-    // Key constraint: control firms must have omega1 = . (missing)
-    // -----------------------------------------------------------------
-    
-    // Draw treated-state initial productivity and the treated fixed effect
-    capture drop omega1
-    tempvar omega1_draw v_draw
-    qui gen double `omega1_draw' = rnormal(`mu_omega', `sd_omega') ///
-        if year == treat_yr0 - 1
-    qui gen double `v_draw' = rnormal(`mu_v', `sigma_v') if year == treat_yr0 - 1
-    
-    // omega1 initialized at treat_yr0 - 1 for treated firms only
-    qui gen double omega1 = `omega1_draw' + `v_draw' if year == treat_yr0 - 1
-    
-    // Verify: control firms must have omega1 = . everywhere
-    qui count if omega1 != . & treat == 0
-    if r(N) > 0 {
-        di as error "_pte_mc_dgp: CRITICAL — control firms have non-missing omega1"
-        exit 459
-    }
-    
-    // =================================================================
     // TASK-001.13: omega0 recursive evolution — ALL firms, ALL periods
     // =================================================================
     // Reference: DOs/mc_simulation_estimation_experiment_pooled.do L64
@@ -251,6 +225,27 @@ program define _pte_mc_dgp, rclass
         qui bys firm (year): replace omega0 = `rho0' + `rho1' * omega0[_n-1] ///
             + `rho2' * (omega0[_n-1])^2 + `rho3' * (omega0[_n-1])^3 ///
             + _pte_eps0 if _n > 1
+    }
+    
+    // =================================================================
+    // TASK-001.12: omega1 initialization — ONLY treated firms at e-1
+    // =================================================================
+    // FIX: omega1 must inherit from the EVOLVED omega0, not from the
+    // population distribution. Drawing from N(mu_omega, sd_omega) causes
+    // systematic negative TT because evolved omega0 >> initial mean.
+    // Correct: omega1 = omega0 + treatment_shock at treat_yr0 - 1
+    // Key constraint: control firms must have omega1 = . (missing)
+    // -----------------------------------------------------------------
+    
+    capture drop omega1
+    qui gen double omega1 = omega0 + rnormal(`mu_v', `sigma_v') ///
+        if year == treat_yr0 - 1
+    
+    // Verify: control firms must have omega1 = . everywhere
+    qui count if omega1 != . & treat == 0
+    if r(N) > 0 {
+        di as error "_pte_mc_dgp: CRITICAL — control firms have non-missing omega1"
+        exit 459
     }
     
     // =================================================================
@@ -432,21 +427,44 @@ program define _pte_mc_dgp, rclass
         }
     }
     else if "`pfunc'" == "cd" {
-        // Cobb-Douglas: lny = bt*t + bl*lnl + bk*lnk + omega_true + eps_y
-        // BETA columns: bt bl bk
-        capture confirm variable t
-        if !_rc {
-            qui gen double lny = `betamat'[1,1] * t ///
-                + `betamat'[1,2] * lnl + `betamat'[1,3] * lnk ///
-                + omega_true + rnormal(0, 0.1)
-        }
-        else {
-            capture confirm variable t1
+        // Cobb-Douglas output generation
+        // BETA columns vary by specification:
+        //   3-col: bt bl bk (with time trend)
+        //   2-col: bl bk (no time trend)
+        local _beta_ncols = colsof(`betamat')
+
+        if `_beta_ncols' >= 3 {
+            // CD with time trend
+            capture confirm variable t
             if !_rc {
-                qui gen double lny = `betamat'[1,1] * t1 ///
+                qui gen double lny = `betamat'[1,1] * t ///
                     + `betamat'[1,2] * lnl + `betamat'[1,3] * lnk ///
                     + omega_true + rnormal(0, 0.1)
             }
+            else {
+                capture confirm variable t1
+                if !_rc {
+                    qui gen double lny = `betamat'[1,1] * t1 ///
+                        + `betamat'[1,2] * lnl + `betamat'[1,3] * lnk ///
+                        + omega_true + rnormal(0, 0.1)
+                }
+                else {
+                    // No time variable found: skip time trend, use cols 2-3
+                    qui gen double lny = `betamat'[1,2] * lnl ///
+                        + `betamat'[1,3] * lnk ///
+                        + omega_true + rnormal(0, 0.1)
+                }
+            }
+        }
+        else if `_beta_ncols' == 2 {
+            // CD without time trend: lny = bl*lnl + bk*lnk + omega_true + eps
+            qui gen double lny = `betamat'[1,1] * lnl ///
+                + `betamat'[1,2] * lnk ///
+                + omega_true + rnormal(0, 0.1)
+        }
+        else {
+            di as error "_pte_mc_dgp: CD beta must have 2 or 3 columns, found `_beta_ncols'"
+            exit 198
         }
     }
     
@@ -532,16 +550,16 @@ program define _pte_mc_dgp, rclass
     qui count if treat == 1
     local n_treated_obs = r(N)
     if `n_treated_obs' > 0 {
-        qui distinct firm if treat == 1
-        local n_treated_firms = r(ndistinct)
+        qui tab firm if treat == 1
+        local n_treated_firms = r(r)
     }
     else {
         local n_treated_firms = 0
     }
     qui count if treat == 0
     if r(N) > 0 {
-        qui distinct firm if treat == 0
-        local n_control_firms = r(ndistinct)
+        qui tab firm if treat == 0
+        local n_control_firms = r(r)
     }
     else {
         local n_control_firms = 0

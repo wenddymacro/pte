@@ -292,7 +292,16 @@ program define _pte_mc_engine, rclass
         // Method I/II comparison via pte_compare (if requested)
         // -----------------------------------------------------------------
         if "`compare'" != "" {
+            // Save pte e() state: pte_compare clears e(cmd)="pte" after
+            // each call, so subsequent calls would fail the e(cmd)=="pte"
+            // prerequisite check. Use estimates store/restore to preserve.
+            cap estimates store _pte_mc_iter
+            local _pte_mc_has_stored = (_rc == 0)
+
             // Method I: Ex-post regression
+            if `_pte_mc_has_stored' {
+                qui estimates restore _pte_mc_iter
+            }
             cap noisily {
                 qui pte_compare, method(expost)
                 matrix `ATT_expost'[`m', 1] = e(att_expost_1)
@@ -307,6 +316,9 @@ program define _pte_mc_engine, rclass
             }
 
             // Method II: Endogenous productivity
+            if `_pte_mc_has_stored' {
+                qui estimates restore _pte_mc_iter
+            }
             cap noisily {
                 qui pte_compare, method(endog) omegapoly(`order')
                 matrix `ATT_endog'[`m', 1] = e(att_endog_1)
@@ -319,6 +331,9 @@ program define _pte_mc_engine, rclass
             if _rc != 0 {
                 local nsim_compare_failed = `nsim_compare_failed' + 1
             }
+
+            // Clean up stored estimates
+            cap estimates drop _pte_mc_iter
         }
 
         // -----------------------------------------------------------------
